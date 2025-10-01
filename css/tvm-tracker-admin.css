@@ -1,0 +1,119 @@
+<?php
+/**
+ * TVM Tracker Admin Styles
+ * Stylesheet for the plugin settings page.
+ *
+ * @version 1.0.9
+ */
+?>
+/* --- General Admin Styles --- */
+.tvm-error-message {
+    color: #a94442;
+    background-color: #f2dede;
+    border: 1px solid #ebccd1;
+    padding: 10px 15px;
+    border-radius: 4px;
+    margin-top: 10px;
+}
+
+/* --- Source Selection Grid --- */
+.tvm-source-selection-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-top: 15px;
+}
+
+/* Base Card Styling */
+.tvm-source-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    width: 120px; /* Fixed width for visual cards */
+    height: 140px; /* Fixed height for consistency */
+    padding: 10px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    cursor: pointer;
+    background-color: #f9f9f9;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.2s ease-in-out;
+}
+
+.tvm-source-card:hover {
+    border-color: #0073aa;
+    background-color: #f0f8ff;
+}
+
+/* Hide the actual checkbox input completely, but ensure it's functional */
+.tvm-source-card input[type="checkbox"] {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    top: 0;
+    left: 0;
+    margin: 0;
+    cursor: pointer;
+    z-index: 2; /* Ensure the hidden input covers the card for clicking */
+}
+
+/* Source Logo */
+.tvm-source-logo {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 50%;
+    margin-bottom: 5px;
+    border: 1px solid #eee;
+    transition: all 0.2s;
+}
+
+.tvm-source-name {
+    font-size: 0.9em;
+    font-weight: 600;
+    color: #333;
+}
+
+/* Status Icon Styling */
+.tvm-source-status {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    font-size: 1.2em;
+    padding: 5px;
+    border-radius: 0 8px 0 0;
+    transition: opacity 0.2s;
+}
+
+/* --- ENABLED STATE STYLES (The Fix) --- */
+
+/* Highlight the entire card when checked */
+.tvm-source-card.is-enabled {
+    border-color: #46b450;
+    background-color: #e6ffed;
+}
+
+/* Style the checkmark */
+.tvm-source-card.is-enabled .dashicons-yes {
+    color: #46b450; /* Green checkmark */
+    display: block;
+}
+
+/* Hide the "X" when checked */
+.tvm-source-card.is-enabled .dashicons-no-alt {
+    display: none;
+}
+
+/* Style the "X" when NOT checked */
+.tvm-source-card:not(.is-enabled) .dashicons-yes {
+    display: none;
+}
+
+.tvm-source-card:not(.is-enabled) .dashicons-no-alt {
+    color: #d54e21; /* Red X */
+    display: block;
+}
