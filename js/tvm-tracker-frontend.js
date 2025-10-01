@@ -2,11 +2,12 @@
  * TVM Tracker Frontend Interactivity (AJAX and UI)
  *
  * Handles:
- * 1. Toggling of season and episode collapsible sections (with UX enhancements).
+ * 1. Toggling of season and episode collapsible sections.
  * 2. AJAX requests for adding/removing a show from the tracker.
  * 3. AJAX requests for marking an episode as watched/unwatched.
+ * 4. AJAX requests for loading unwatched episode details on the Unwatched View.
  *
- * @since 1.3.1
+ * @since 1.3.2
  */
 
 jQuery(document).ready(function($) {
@@ -27,18 +28,26 @@ jQuery(document).ready(function($) {
      * @param {jQuery} $targetElement The element near which the message should be displayed.
      */
     function showLocalStatusMessage(message, type, $targetElement) {
-        // Clear any existing local messages near the target
-        $targetElement.siblings('.tvm-local-status').remove();
+        // Find the nearest status message container (next to the button)
+        const $statusContainer = $targetElement.siblings('.tvm-local-status, .tvm-unwatched-status');
+        
+        // Use the nearest container if found, otherwise use a generic global message (fallback for non-button interactions)
+        let $messageBox = $statusContainer.length ? $statusContainer : $('.tvm-tracker-container').find('.tvm-global-status');
 
-        const $messageBox = $('<span class="tvm-local-status ' + type + '"></span>');
-        $messageBox.html(message).insertAfter($targetElement).fadeIn(200);
+        if ($statusContainer.length) {
+            // Local message display logic
+            $statusContainer.html(message).removeClass('success error').addClass(type).fadeIn(200);
 
-        // Auto-fade after 3 seconds
-        setTimeout(function() {
-            $messageBox.fadeOut(500, function() {
-                $(this).remove();
-            });
-        }, 3000);
+            // Auto-fade after 3 seconds
+            setTimeout(function() {
+                $statusContainer.fadeOut(500, function() {
+                    $(this).empty(); // Clear content on fade out
+                });
+            }, 3000);
+        } else {
+            // Global message fallback
+            showGlobalStatusMessage(message, type);
+        }
     }
 
 
@@ -59,6 +68,7 @@ jQuery(document).ready(function($) {
     // --- Season/Episode Collapse/Expand Logic ---
 
     // Handler for both season and episode headers
+    // Using delegated event handling on the container for better reliability
     $('.tvm-tracker-container').on('click', '.tvm-season-header, .tvm-episode-header', function(e) {
         // Prevent action if a child interactive element was clicked (buttons, anchors, or the episode toggle button)
         if ($(e.target).is('button, a, .tvm-episode-toggle')) {
@@ -216,7 +226,11 @@ jQuery(document).ready(function($) {
                         $(this).remove();
                         // Check if the list is empty and display a message if so (optional UX)
                         if ($('.tvm-unwatched-item').length === 0) {
-                            $('.tvm-unwatched-list').after('<p class="tvm-empty-list">' + 'You are caught up on all unwatched episodes!' + '</p>');
+                            $('.tvm-unwatched-list').first().after('<p class="tvm-empty-list">' + 'You are caught up on all unwatched episodes!' + '</p>');
+                            // Also check the poster grid if present
+                            if ($('.tvm-unwatched-poster-grid').length) {
+                                $('.tvm-unwatched-poster-grid').empty().parent().append('<p>' + 'No tracked shows have unwatched episodes.' + '</p>');
+                            }
                         }
                     });
                 } else {
@@ -228,6 +242,41 @@ jQuery(document).ready(function($) {
             })
             .always(function() {
                 $button.prop('disabled', false);
+            });
+    });
+    
+    // --- Unwatched Page Show Selector (Poster Click) ---
+    $('.tvm-tracker-container').on('click', '.tvm-unwatched-poster-selector', function(e) {
+        e.preventDefault();
+        const $item = $(this);
+        const titleId = $item.data('title-id');
+
+        // Highlight selected poster
+        $('.tvm-unwatched-poster-selector').removeClass('is-selected');
+        $item.addClass('is-selected');
+
+        // Show spinner/loading state in detail card area
+        const $detailCard = $('#tvm-episode-detail-card');
+        $detailCard.html('<div class="tvm-loading-spinner">' + 'Loading episode details...' + '</div>').fadeIn(100);
+
+        // Data to send via AJAX
+        const data = {
+            action: 'tvm_tracker_load_unwatched_episode',
+            nonce: tvmTrackerAjax.nonce,
+            title_id: titleId
+        };
+
+        $.post(tvmTrackerAjax.ajax_url, data)
+            .done(function(response) {
+                if (response.success) {
+                    // Inject the rendered episode card HTML
+                    $detailCard.html(response.data.html);
+                } else {
+                    $detailCard.html('<p class="tvm-error-message">' + (response.data.message || 'Error loading episode details.') + '</p>');
+                }
+            })
+            .fail(function() {
+                $detailCard.html('<p class="tvm-error-message">AJAX request failed to load episode data.</p>');
             });
     });
 });
