@@ -1,11 +1,11 @@
 <?php
 /**
  * TVM Tracker - Watchmode API Client
- * Handles all communication and caching for the Watchmode API.
+ * Handles all communication and caching for the Watchmode API (Schema V2.0 compatibility).
  *
  * @package Tvm_Tracker
  * @subpackage Includes
- * @version 1.0.6
+ * @version 2.0.0
  */
 
 // Exit if accessed directly.
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Tvm_Tracker_API {
 
-    const VERSION = '1.0.6';
+    const VERSION = '2.0.0';
     const CACHE_DURATION = 43200; // 12 hours in seconds
     const API_URL = 'https://api.watchmode.com/v1/';
 
@@ -31,7 +31,7 @@ class Tvm_Tracker_API {
      * Constructor.
      */
     public function __construct() {
-        // Initialization can happen here if needed, currently handled by main plugin class.
+        // Initialization can happen here if needed.
     }
 
     /**
@@ -116,6 +116,7 @@ class Tvm_Tracker_API {
 
     /**
      * Fetches all streaming sources from the Watchmode API.
+     * This is used by the database class to populate the local source table.
      *
      * @return array|WP_Error
      */
@@ -148,6 +149,7 @@ class Tvm_Tracker_API {
 
     /**
      * Gets detailed information for a specific title ID.
+     * Used mainly for poster/year/overview on details page and tracker page.
      *
      * @param int $title_id The Watchmode title ID.
      * @return array|WP_Error
@@ -156,21 +158,22 @@ class Tvm_Tracker_API {
         $endpoint = "title/{$title_id}/details/";
         return $this->tvm_tracker_api_request( $endpoint, array(), true );
     }
-
+    
     /**
      * Gets the season information for a specific title ID.
+     * NOTE: This method is needed for compatibility but relies on API cache.
      *
      * @param int $title_id The Watchmode title ID.
      * @return array|WP_Error
      */
     public function tvm_tracker_get_seasons( $title_id ) {
         $endpoint = "title/{$title_id}/seasons/";
-        // The API response is the array of seasons directly, so we rely on the request method's return.
         return $this->tvm_tracker_api_request( $endpoint, array(), true );
     }
 
     /**
-     * Gets the episode information for a specific title ID.
+     * Gets the full episode information for a specific title ID.
+     * This is used primarily by the DB class to populate static episode data.
      *
      * @param int $title_id The Watchmode title ID.
      * @return array|WP_Error
@@ -179,16 +182,16 @@ class Tvm_Tracker_API {
         $endpoint = "title/{$title_id}/episodes/";
         $response = $this->tvm_tracker_api_request( $endpoint, array(), true );
 
-        // The API returns the episodes array directly as the top level response
         if ( is_wp_error( $response ) || ! is_array( $response ) ) {
             return array();
         }
 
         return $response;
     }
-
+    
     /**
      * Gets streaming source data for a specific title ID.
+     * NOTE: This method is needed for compatibility but relies on API cache.
      *
      * @param int $title_id The Watchmode title ID.
      * @return array|WP_Error

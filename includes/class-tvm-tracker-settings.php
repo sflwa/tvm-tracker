@@ -182,58 +182,63 @@ class Tvm_Tracker_Settings {
      * Renders the Streaming Sources selection area.
      */
     public function tvm_tracker_enabled_sources_render() {
-        $enabled_sources = get_option( 'tvm_tracker_enabled_sources', array() );
-        $all_sources = $this->api_client->tvm_tracker_get_all_sources();
+        // V2.0: We need access to the DB client instance to call the population function
+        global $wpdb;
+        $table_name_sources = $wpdb->prefix . 'tvm_tracker_sources';
 
-        if ( is_wp_error( $all_sources ) ) {
-            // Display error and debug info if API fails
-            echo '<p class="tvm-error-message">' . esc_html( $all_sources->get_error_message() ) . '</p>';
-            if ( $this->tvm_tracker_is_debug_on() && class_exists( 'Tvm_Tracker_API' ) ) {
-                $this->tvm_tracker_display_debug_url( Tvm_Tracker_API::tvm_tracker_get_api_urls_called() );
-            }
-            return;
+        // 1. CRITICAL FIX: Ensure global sources table is populated if empty.
+        $db_client = Tvm_Tracker_Plugin::tvm_tracker_get_instance()->get_db_client();
+        if ( $db_client && absint( $wpdb->get_var( "SELECT COUNT(id) FROM $table_name_sources" ) ) === 0 ) {
+             // If sources are missing, try to populate them now.
+             $db_client->tvm_tracker_populate_global_sources();
         }
+        
+        // 2. Fetch enabled sources and cast them to integers for reliable checking.
+        $enabled_sources_raw = get_option( 'tvm_tracker_enabled_sources', array() );
+        $enabled_sources = array_map('absint', (array)$enabled_sources_raw);
+        
+        // 3. Retrieve all sources from the local database
+        $all_sources = $wpdb->get_results( "SELECT source_id, source_name, logo_url FROM $table_name_sources ORDER BY source_name ASC", ARRAY_A );
+
 
         if ( empty( $all_sources ) ) {
-            echo '<p class="description">' . esc_html__( 'Could not retrieve sources. Please ensure your API key is correct.', 'tvm-tracker' ) . '</p>';
+            echo '<p class="description">' . esc_html__( 'Could not retrieve sources. Please ensure your API key is correct and tracked shows are populated.', 'tvm-tracker' ) . '</p>';
             return;
         }
 
         echo '<div class="tvm-source-selection-container">';
         foreach ( $all_sources as $source ) {
-            // Only show sources that have a logo and are available in the US (or a specific region, simplify to US for now)
-            if ( ! empty( $source['logo_100px'] ) && in_array( 'US', $source['regions'] ) ) {
+            
+            $source_id = absint( $source['source_id'] );
+            $source_name = sanitize_text_field( $source['source_name'] );
+            $logo_url = esc_url( $source['logo_url'] );
+            // Comparison is now safe because $enabled_sources is all integers.
+            $checked = in_array( $source_id, $enabled_sources ); 
+            $checked_attr = checked( true, $checked, false );
+            $alt_text = sprintf( /* translators: 1: Streaming Service Name */ esc_attr__( '%s logo', 'tvm-tracker' ), $source_name );
+            $is_enabled_class = $checked ? 'is-enabled' : '';
 
-                $source_id = absint( $source['id'] );
-                $source_name = sanitize_text_field( $source['name'] );
-                $logo_url = esc_url( $source['logo_100px'] );
-                $checked = in_array( $source_id, $enabled_sources );
-                $checked_attr = checked( true, $checked, false );
-                $alt_text = sprintf( /* translators: 1: Streaming Service Name */ esc_attr__( '%s logo', 'tvm-tracker' ), $source_name );
-                $is_enabled_class = $checked ? 'is-enabled' : '';
-
-                ?>
-                <label for="tvm_source_<?php echo esc_attr( $source_id ); ?>" class="tvm-source-card <?php echo esc_attr( $is_enabled_class ); ?>">
-                    <input
-                        type="checkbox"
-                        id="tvm_source_<?php echo esc_attr( $source_id ); ?>"
-                        name="tvm_tracker_enabled_sources[]"
-                        value="<?php echo esc_attr( $source_id ); ?>"
-                        <?php echo $checked_attr; // Escaping handled by checked() ?>
-                        hidden
-                    />
-                    <img src="<?php echo esc_url( $logo_url ); ?>" alt="<?php echo esc_attr( $alt_text ); ?>" class="tvm-source-logo" />
-                    <span class="tvm-source-name"><?php echo esc_html( $source_name ); ?></span>
-                    <span class="tvm-source-status">
-                        <?php if ( $checked ) : ?>
-                            <span class="dashicons dashicons-yes"></span>
-                        <?php else : ?>
-                            <span class="dashicons dashicons-no-alt"></span>
-                        <?php endif; ?>
-                    </span>
-                </label>
-                <?php
-            }
+            ?>
+            <label for="tvm_source_<?php echo esc_attr( $source_id ); ?>" class="tvm-source-card <?php echo esc_attr( $is_enabled_class ); ?>">
+                <input
+                    type="checkbox"
+                    id="tvm_source_<?php echo esc_attr( $source_id ); ?>"
+                    name="tvm_tracker_enabled_sources[]"
+                    value="<?php echo esc_attr( $source_id ); ?>"
+                    <?php echo $checked_attr; // Escaping handled by checked() ?>
+                    hidden
+                />
+                <img src="<?php echo esc_url( $logo_url ); ?>" alt="<?php echo esc_attr( $alt_text ); ?>" class="tvm-source-logo" />
+                <span class="tvm-source-name"><?php echo esc_html( $source_name ); ?></span>
+                <span class="tvm-source-status">
+                    <?php if ( $checked ) : ?>
+                        <span class="dashicons dashicons-yes"></span>
+                    <?php else : ?>
+                        <span class="dashicons dashicons-no-alt"></span>
+                    <?php endif; ?>
+                </span>
+            </label>
+            <?php
         }
         echo '</div>'; // .tvm-source-selection-container
 
@@ -301,11 +306,13 @@ class Tvm_Tracker_Settings {
     /**
      * Sanitize the array of enabled sources (ensure all values are positive integers).
      *
-     * @param array $input Array of source IDs.
-     * @return array
+     * @param array $input Array of source IDs (as strings or integers).
+     * @return array Array of source IDs as integers.
      */
     public function tvm_tracker_sanitize_enabled_sources( $input ) {
         if ( is_array( $input ) ) {
+            // CRITICAL FIX: Ensure all incoming IDs are cast to integers before saving.
+            // This prevents the strict type checking failure on the frontend.
             return array_map( 'absint', $input );
         }
         return array();
@@ -340,7 +347,7 @@ class Tvm_Tracker_Settings {
         if ( is_array( $urls ) ) {
             echo '<ol>';
             foreach ( $urls as $url ) {
-                echo '<li>' . esc_url( $url ) . '</li>';
+                echo '<li>' . esc_html( $url ) . '</li>';
             }
             echo '</ol>';
         } else {

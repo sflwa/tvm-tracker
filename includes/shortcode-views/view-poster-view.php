@@ -23,11 +23,9 @@
         <a href="<?php echo esc_url( $details_url ); ?>" class="tvm-poster-item">
             <img src="<?php echo esc_url( $poster_url ); ?>" alt="<?php echo $show_title . esc_attr__( ' Poster', 'tvm-tracker' ); ?>" onerror="this.onerror=null;this.src='<?php echo esc_url( 'https://placehold.co/200x300/eeeeee/333333?text=' . urlencode( $show_title ) ); ?>';">
 
-            <!-- Progress Overlay -->
+            <!-- Progress Overlay: Now positioned at top right -->
             <div class="tvm-poster-progress-overlay">
-                <span class="tvm-progress-count">
-                    <?php echo absint( $watched_count ); ?> / <?php echo absint( $total_count ); ?>
-                </span>
+                <?php echo absint( $watched_count ); ?> / <?php echo absint( $total_count ); ?>
             </div>
         </a>
     <?php endforeach; ?>

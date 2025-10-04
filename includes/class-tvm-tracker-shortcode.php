@@ -5,7 +5,7 @@
  *
  * @package Tvm_Tracker
  * @subpackage Includes
- * @version 1.1.39
+ * @version 1.1.52
  */
 
 // Exit if accessed directly.
@@ -20,7 +20,7 @@ if ( ! class_exists( 'Tvm_Tracker_Shortcode' ) ) {
  */
 class Tvm_Tracker_Shortcode {
 
-    const VERSION = '1.1.39';
+    const VERSION = '1.1.52';
 
     private $api_client;
     private $db_client;
@@ -46,7 +46,7 @@ class Tvm_Tracker_Shortcode {
         wp_enqueue_style( 'tvm-tracker-frontend', TVM_TRACKER_URL . 'css/tvm-tracker-frontend.css', array(), self::VERSION );
 
         // Enqueue frontend script (for AJAX and interaction)
-        wp_enqueue_script( 'tvm-tracker-frontend-js', TVM_TRACKER_URL . 'js/tvm-tracker-frontend.js', array( 'jquery' ), '1.3.2', true );
+        wp_enqueue_script( 'tvm-tracker-frontend-js', TVM_TRACKER_URL . 'js/tvm-tracker-frontend.js', array( 'jquery' ), '1.3.4', true );
 
         // Localize script for AJAX calls
         wp_localize_script( 'tvm-tracker-frontend-js', 'tvmTrackerAjax', array(
@@ -87,7 +87,9 @@ class Tvm_Tracker_Shortcode {
             $current_user_id = get_current_user_id();
             $permalink = get_permalink();
             $all_sources = $api_client->tvm_tracker_get_all_sources();
-            $enabled_sources = get_option( 'tvm_tracker_enabled_sources', array() );
+            // CRITICAL: Fetch enabled sources and ensure they are INTEGERS for strict comparison
+            $enabled_sources_raw = get_option( 'tvm_tracker_enabled_sources', array() ); 
+            $enabled_sources = array_map('absint', (array)$enabled_sources_raw);
             $source_map = array();
 
             if ( ! is_wp_error( $all_sources ) && is_array( $all_sources ) ) {
@@ -96,17 +98,22 @@ class Tvm_Tracker_Shortcode {
                 }
             }
 
-
             // Render logic delegation
             if ( ! empty( $title_id ) ) {
                 // Details Page
                 require TVM_TRACKER_PATH . 'includes/shortcode-views/view-details-page.php';
+            } elseif ( ! empty( $action_view ) && $action_view === 'movies' ) { // NEW ROUTE
+                // Movie Tracker Page
+                require TVM_TRACKER_PATH . 'includes/shortcode-views/view-my-tracker.php';
             } elseif ( ! empty( $action_view ) && $action_view === 'tracker' ) {
-                // My Tracker Page (List/Poster)
+                // My Tracker Page (Shows/Base View)
                 require TVM_TRACKER_PATH . 'includes/shortcode-views/view-my-tracker.php';
             } elseif ( ! empty( $action_view ) && $action_view === 'unwatched' ) {
                 // Unwatched Episodes Page
                 require TVM_TRACKER_PATH . 'includes/shortcode-views/view-unwatched-page.php';
+            } elseif ( ! empty( $action_view ) && $action_view === 'upcoming' ) {
+                 // Upcoming Calendar Page
+                require TVM_TRACKER_PATH . 'includes/shortcode-views/view-upcoming-calendar.php';
             } elseif ( ! empty( $search_query ) ) {
                 // Search Results Page
                 require TVM_TRACKER_PATH . 'includes/shortcode-views/view-search-results.php';
@@ -124,15 +131,60 @@ class Tvm_Tracker_Shortcode {
     }
 
     /**
-     * AJAX callback to load the next unwatched episode's HTML.
+     * Helper function to filter episodes by date type.
+     * * @param array $episodes Array of episode data.
+     * @param string $type 'upcoming' (>= today) or 'past' (< today).
+     * @return array Filtered array of episodes.
+     */
+    private function tvm_tracker_filter_episodes_by_type( $episodes, $type ) {
+        $today = date_i18n('Y-m-d');
+        
+        $filtered = array_filter( $episodes, function( $episode ) use ( $today, $type ) {
+            // Use 'air_date' from the V2.0 database structure
+            $air_date = $episode['air_date'] ?? '0000-00-00'; 
+            
+            // Check for valid date (handles '0000-00-00' and missing dates)
+            $has_valid_date = ! empty( $air_date ) && $air_date !== '0000-00-00';
+
+            // Determine upcoming status based on valid date
+            if ( $has_valid_date ) {
+                $is_upcoming = $air_date >= $today;
+            } else {
+                // If date is invalid or missing, always treat it as 'past' for viewing logic
+                $is_upcoming = false;
+            }
+
+            if ( 'upcoming' === $type ) {
+                return $is_upcoming;
+            } else { // 'past'
+                return ! $is_upcoming;
+            }
+        });
+        
+        // Re-index the array after filtering
+        return array_values($filtered);
+    }
+
+
+    /**
+     * AJAX callback to load the next unwatched episode's HTML (for Upcoming)
+     * or the full list of past episodes (for Past).
      */
     public function tvm_tracker_load_unwatched_episode_callback() {
-        // Dependencies are available via $this->db_client and $this->api_client
+        // Dependencies are locally available in this scope:
         $db_client = $this->db_client;
-        $api_client = $this->api_client;
+        $api_client = $this->api_client; 
+        
+        // CRITICAL FIX: Explicitly fetch enabled sources for AJAX scope and cast to integer
+        $enabled_sources_raw = get_option( 'tvm_tracker_enabled_sources', array() );
+        $enabled_sources = array_map('absint', (array)$enabled_sources_raw); 
+        
+        // Ensure sources and source map are available for the view file (though source map is mostly unused in V2.0)
         $all_sources = $api_client->tvm_tracker_get_all_sources();
-        $enabled_sources = get_option( 'tvm_tracker_enabled_sources', array() );
         $source_map = array();
+        
+        // Include the sources rendering helper function definition
+        require_once TVM_TRACKER_PATH . 'includes/shortcode-views/view-render-sources-detail.php'; 
 
         if ( ! is_wp_error( $all_sources ) && is_array( $all_sources ) ) {
             foreach ( $all_sources as $source ) {
@@ -144,6 +196,7 @@ class Tvm_Tracker_Shortcode {
 
         $nonce = sanitize_text_field( $_POST['nonce'] ?? '' );
         $title_id = absint( $_POST['title_id'] ?? 0 );
+        $type = sanitize_text_field( $_POST['type'] ?? 'upcoming' ); // 'upcoming' or 'past'
 
         if ( ! wp_verify_nonce( $nonce, 'tvm_tracker_ajax_nonce' ) || ! $title_id || ! is_user_logged_in() ) {
             wp_send_json_error( array( 'message' => esc_html__( 'Security check failed.', 'tvm-tracker' ) ) );
@@ -151,35 +204,75 @@ class Tvm_Tracker_Shortcode {
 
         $user_id = get_current_user_id();
 
-        // 1. Get ALL unwatched episodes for all shows
-        $unwatched_episodes_raw = $db_client->tvm_tracker_get_unwatched_episodes( $user_id );
+        // 1. Get ALL unwatched episodes for the specific user
+        // We call the method that gets ALL unwatched episodes and manually filter by title_id here.
+        $all_unwatched_episodes = $db_client->tvm_tracker_get_unwatched_episodes( $user_id );
         
-        // 2. Filter list to only include episodes from the requested $title_id
-        $show_unwatched = array_filter($unwatched_episodes_raw, function($ep) use ($title_id) {
-            return absint($ep['title_id']) === $title_id;
+        // Filter the results down to just the requested title ID
+        $title_unwatched_episodes = array_filter($all_unwatched_episodes, function($episode) use ($title_id) {
+            return absint($episode['title_id']) === $title_id;
         });
-
-        // 3. Sort by release date (soonest first)
-        usort( $show_unwatched, function( $a, $b ) {
-            return strtotime( $a['release_date'] ) <=> strtotime( $b['release_date'] );
-        } );
         
-        // 4. Get the NEXT unwatched episode (the first in the sorted array)
-        $next_episode = reset($show_unwatched);
+        if ( empty( $title_unwatched_episodes ) ) {
+            wp_send_json_error( array( 
+                'html' => '<p class="tvm-empty-list">' . esc_html__( 'All episodes for this show are watched!', 'tvm-tracker' ) . '</p>',
+                'message' => esc_html__( 'All episodes for this show are watched!', 'tvm-tracker' ),
+            ) );
+        }
 
-        if ( empty( $next_episode ) ) {
-            wp_send_json_error( array( 'message' => esc_html__( 'All episodes for this show are watched!', 'tvm-tracker' ) ) );
+        // 2. Filter by Upcoming or Past using the helper function
+        $filtered_episodes = $this->tvm_tracker_filter_episodes_by_type($title_unwatched_episodes, $type);
+        
+        if ( empty( $filtered_episodes ) ) {
+            $msg = ( 'upcoming' === $type ) 
+                ? esc_html__( 'No upcoming unwatched episodes for this show.', 'tvm-tracker' )
+                : esc_html__( 'No past unwatched episodes for this show.', 'tvm-tracker' );
+            wp_send_json_success( array( 
+                'html' => '<p class="tvm-empty-list">' . $msg . '</p>',
+                'message' => $msg,
+            ) );
+        }
+
+        ob_start();
+
+        // CRITICAL FIX: Explicitly pass objects into view scope
+        // This ensures the view files can reliably access $db_client and $api_client
+        global $db_client, $api_client, $enabled_sources, $source_map;
+        $db_client = $this->db_client;
+        $api_client = $this->api_client;
+        $enabled_sources = array_map('absint', (array)get_option( 'tvm_tracker_enabled_sources', array() ));
+        // $source_map remains defined above
+
+        if ( 'upcoming' === $type ) {
+            // Upcoming: Sort by release date (soonest first - ASC)
+            usort( $filtered_episodes, function( $a, $b ) {
+                return strtotime( $a['air_date'] ) <=> strtotime( $b['air_date'] );
+            } );
+            
+            $upcoming_episodes_list = $filtered_episodes; 
+            $view_file = TVM_TRACKER_PATH . 'includes/shortcode-views/view-single-unwatched-episode.php';
+            
+            // RENDER: Pass all required variables into the view scope
+            require $view_file;
+            
+        } else {
+            // Past: Sort by release date (oldest first - ASC)
+            usort( $filtered_episodes, function( $a, $b ) {
+                return strtotime( $a['air_date'] ) <=> strtotime( $b['air_date'] );
+            } );
+
+            $past_episodes_list = $filtered_episodes;
+            $view_file = TVM_TRACKER_PATH . 'includes/shortcode-views/view-list-unwatched-past.php';
+            
+            // RENDER: Pass all required variables into the view scope
+            require $view_file;
         }
         
-        // 5. Render the HTML and return
-        // Pass necessary variables to the template file
-        ob_start();
-        require TVM_TRACKER_PATH . 'includes/shortcode-views/view-single-unwatched-episode.php';
         $html = ob_get_clean();
 
         wp_send_json_success( array( 
             'html' => $html,
-            'message' => esc_html__( 'Episode details loaded.', 'tvm-tracker' ),
+            'message' => esc_html__( 'Episode details loaded successfully.', 'tvm-tracker' ),
         ) );
     }
 
@@ -208,5 +301,4 @@ class Tvm_Tracker_Shortcode {
         }
     }
 }
-
 }

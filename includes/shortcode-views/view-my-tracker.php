@@ -10,113 +10,90 @@
  */
 
 global $wp_query;
-$view = $wp_query->get( 'tvm_view' ) ?: 'poster'; // Default to poster view
+// Check if the primary action view is 'movies' or 'shows'
+$action_view = get_query_var( 'tvm_action_view' ) === 'movies' ? 'movies' : 'shows';
+$view = $wp_query->get( 'tvm_view' ) ?: 'poster'; // Default view for shows/movies
 
-$tracked_shows_raw = $db_client->tvm_tracker_get_tracked_shows( $current_user_id );
+$current_user_id = get_current_user_id();
+
+// --- 1. Fetch Tracked Items based on type ---
+if ($action_view === 'movies') {
+    $tracked_items_raw = $db_client->tvm_tracker_get_tracked_movies( $current_user_id );
+} else {
+    $tracked_items_raw = $db_client->tvm_tracker_get_tracked_shows( $current_user_id );
+}
 
 // Sort by title name alphabetically
-usort( $tracked_shows_raw, function( $a, $b ) {
+usort( $tracked_items_raw, function( $a, $b ) {
     return strcasecmp( $a->title_name, $b->title_name );
 } );
 
-// Inject poster URL and year via API Client (cached)
-$tracked_shows = array_map( function( $show ) use ( $api_client ) {
-    // Check cache for details before calling API
-    $details = $api_client->tvm_tracker_get_title_details( absint( $show->title_id ) );
+// --- 2. Inject external details (Poster/Year) ---
+$tracked_items = array_map( function( $item ) use ( $api_client ) {
+    // Fetch details via cached API call
+    $details = $api_client->tvm_tracker_get_title_details( absint( $item->title_id ) );
 
-    $show->poster = is_array( $details ) ? esc_url( $details['poster'] ?? '' ) : '';
-    $show->year = is_array( $details ) ? absint( $details['year'] ?? 0 ) : 0;
-    return $show;
-}, $tracked_shows_raw );
+    $item->poster = is_array( $details ) ? esc_url( $details['poster'] ?? '' ) : '';
+    $item->year = is_array( $details ) ? absint( $details['year'] ?? 0 ) : 0;
+    return $item;
+}, $tracked_items_raw );
 
-$current_url = trailingslashit( $permalink ) . 'my-shows';
+
+$base_url = trailingslashit( $permalink ) . 'my-shows';
 $back_to_search_url = esc_url( $permalink );
-$unwatched_url = trailingslashit( $current_url ) . 'unwatched';
+$unwatched_url = trailingslashit( $base_url ) . 'unwatched';
+$upcoming_url = trailingslashit( $base_url ) . 'upcoming';
 
+// Determine URLs for view toggles
+$current_view_url = trailingslashit( $base_url ) . ($action_view === 'movies' ? 'movies' : '');
 ?>
+
 <div class="tvm-tracker-list-header">
-    <h3><?php esc_html_e( 'My Tracked Shows', 'tvm-tracker' ); ?></h3>
+    <h3>
+        <?php echo ( $action_view === 'movies' ) 
+            ? esc_html__( 'My Tracked Movies', 'tvm-tracker' ) 
+            : esc_html__( 'My Tracked Series', 'tvm-tracker' ); 
+        ?>
+    </h3>
     <div class="tvm-details-actions">
+        
+        <!-- Navigation to other pages -->
+        <a href="<?php echo esc_url( $upcoming_url ); ?>" class="tvm-button tvm-button-details"><?php esc_html_e( 'Upcoming Schedule', 'tvm-tracker' ); ?></a>
         <a href="<?php echo esc_url( $unwatched_url ); ?>" class="tvm-button tvm-button-details"><?php esc_html_e( 'Unwatched Episodes', 'tvm-tracker' ); ?></a>
         <a href="<?php echo $back_to_search_url; ?>" class="tvm-button tvm-button-back"><?php esc_html_e( 'Back to Search', 'tvm-tracker' ); ?></a>
     </div>
 </div>
 
-<div class="tvm-view-toggles">
-    <a href="<?php echo esc_url( remove_query_arg( 'tvm_view', $current_url ) ); ?>" class="tvm-button <?php echo ( $view === 'list' ) ? 'tvm-button-view-active' : 'tvm-button-view'; ?>"><?php esc_html_e( 'List View', 'tvm-tracker' ); ?></a>
-    <a href="<?php echo esc_url( add_query_arg( 'tvm_view', 'poster', $current_url ) ); ?>" class="tvm-button <?php echo ( $view === 'poster' ) ? 'tvm-button-view-active' : 'tvm-button-view'; ?>"><?php esc_html_e( 'Poster View', 'tvm-tracker' ); ?></a>
+<!-- SERIES/MOVIE TOGGLE -->
+<div class="tvm-type-toggles">
+    <a href="<?php echo esc_url( $base_url ); ?>" class="tvm-button <?php echo ( $action_view === 'shows' ) ? 'tvm-button-view-active' : 'tvm-button-view'; ?>"><?php esc_html_e( 'Series Tracker', 'tvm-tracker' ); ?></a>
+    <a href="<?php echo esc_url( trailingslashit( $base_url ) . 'movies' ); ?>" class="tvm-button <?php echo ( $action_view === 'movies' ) ? 'tvm-button-view-active' : 'tvm-button-view'; ?>"><?php esc_html_e( 'Movie Tracker', 'tvm-tracker' ); ?></a>
 </div>
 
-<?php if ( empty( $tracked_shows ) ) : ?>
-    <p><?php esc_html_e( 'You are not currently tracking any shows. Use the search bar to find some!', 'tvm-tracker' ); ?></p>
-<?php elseif ( $view === 'list' ) :
-    require TVM_TRACKER_PATH . 'includes/shortcode-views/view-list-view.php';
-elseif ( $view === 'poster' ) :
-    require TVM_TRACKER_PATH . 'includes/shortcode-views/view-poster-view.php';
+<?php if ( $action_view === 'movies' ) : 
+    // Movie View (Future/Past Split is handled internally by view-tracked-movies)
+    require TVM_TRACKER_PATH . 'includes/shortcode-views/view-tracked-movies.php';
+
+// --- TV SERIES VIEW ---
+else : 
+    // Ensure variables for sub-views are named correctly
+    $tracked_shows = $tracked_items;
+    ?>
+    <div class="tvm-view-toggles">
+        <a href="<?php echo esc_url( remove_query_arg( 'tvm_view', $base_url ) ); ?>" class="tvm-button <?php echo ( $view === 'list' ) ? 'tvm-button-view-active' : 'tvm-button-view'; ?>"><?php esc_html_e( 'List View', 'tvm-tracker' ); ?></a>
+        <a href="<?php echo esc_url( add_query_arg( 'tvm_view', 'poster', $base_url ) ); ?>" class="tvm-button <?php echo ( $view === 'poster' ) ? 'tvm-button-view-active' : 'tvm-button-view'; ?>"><?php esc_html_e( 'Poster View', 'tvm-tracker' ); ?></a>
+    </div>
+    
+    <?php if ( empty( $tracked_items ) ) : ?>
+        <p><?php esc_html_e( 'You are not currently tracking any series. Use the search bar to find some!', 'tvm-tracker' ); ?></p>
+    <?php elseif ( $view === 'list' ) :
+        // List View: Variables $tracked_shows, $db_client, $permalink are available in scope.
+        require TVM_TRACKER_PATH . 'includes/shortcode-views/view-list-view.php';
+    elseif ( $view === 'poster' ) :
+        // Poster View: Variables $tracked_shows, $db_client, $permalink are available in scope.
+        require TVM_TRACKER_PATH . 'includes/shortcode-views/view-poster-view.php';
+    endif;
+    
 endif;
 
-
-// Helper function for List View rendering
-if ( ! function_exists( 'tvm_tracker_render_list_view_template' ) ) {
-    function tvm_tracker_render_list_view_template( $tracked_shows, $db_client, $permalink ) {
-        // Render List View HTML
-        ?>
-        <ul class="tvm-results-list tvm-tracked-list">
-            <?php foreach ( $tracked_shows as $show ) : 
-                // Calculate progress
-                $watched_count = $db_client->tvm_tracker_get_watched_episodes_count( get_current_user_id(), absint( $show->title_id ) );
-                $total_count = absint( $show->total_episodes );
-                $progress = ( $total_count > 0 ) ? round( ( $watched_count / $total_count ) * 100 ) : 0;
-                $details_url = trailingslashit( $permalink ) . 'details/' . absint( $show->title_id );
-            ?>
-                <li class="tvm-result-item tvm-tracked-item">
-                    <span class="tvm-result-title">
-                        <?php echo esc_html( $show->title_name ); ?>
-                        <?php if ( $show->year > 0 ) : ?>
-                            (<?php echo esc_html( $show->year ); ?>)
-                        <?php endif; ?>
-                    </span>
-                    <span class="tvm-tracker-progress">
-                        <?php
-                        /* translators: 1: percentage watched, 2: episodes watched, 3: total episodes */
-                        printf( esc_html__( 'Progress: %1$d%% (%2$d / %3$d episodes watched)', 'tvm-tracker' ), $progress, $watched_count, $total_count );
-                        ?>
-                    </span>
-                    <a href="<?php echo esc_url( $details_url ); ?>" class="tvm-button tvm-button-details"><?php esc_html_e( 'View Details', 'tvm-tracker' ); ?></a>
-                </li>
-            <?php endforeach; ?>
-        </ul>
-        <?php
-    }
-}
-
-// Helper function for Poster View rendering
-if ( ! function_exists( 'tvm_tracker_render_poster_view_template' ) ) {
-    function tvm_tracker_render_poster_view_template( $tracked_shows, $db_client, $permalink ) {
-        // Render Poster View HTML
-        ?>
-        <div class="tvm-poster-grid">
-            <?php foreach ( $tracked_shows as $show ) :
-                // Calculate progress
-                $watched_count = $db_client->tvm_tracker_get_watched_episodes_count( get_current_user_id(), absint( $show->title_id ) );
-                $total_count = absint( $show->total_episodes );
-                $details_url = trailingslashit( $permalink ) . 'details/' . absint( $show->title_id );
-
-                $poster_url = $show->poster;
-                $show_title = esc_attr( $show->title_name );
-            ?>
-                <a href="<?php echo esc_url( $details_url ); ?>" class="tvm-poster-item">
-                    <img src="<?php echo esc_url( $poster_url ); ?>" alt="<?php echo $show_title . esc_attr__( ' Poster', 'tvm-tracker' ); ?>" onerror="this.onerror=null;this.src='<?php echo esc_url( 'https://placehold.co/200x300/eeeeee/333333?text=' . urlencode( $show_title ) ); ?>';">
-
-                    <!-- Progress Overlay -->
-                    <div class="tvm-poster-progress-overlay">
-                        <span class="tvm-progress-count">
-                            <?php echo absint( $watched_count ); ?> / <?php echo absint( $total_count ); ?>
-                        </span>
-                    </div>
-                </a>
-            <?php endforeach; ?>
-        </div>
-        <?php
-    }
-}
+// Removed helper function definitions to fix parse error.

@@ -3,7 +3,7 @@
  * Plugin Name: TVM Tracker
  * Plugin URI:  [Your Plugin URI]
  * Description: A powerful WordPress plugin for tracking TV show and movie watch progress via the Watchmode API.
- * Version:     1.0.20
+ * Version:     2.0.1
  * Author:      [Your Name]
  * Author URI:  [Your Website]
  * Text Domain: tvm-tracker
@@ -78,6 +78,15 @@ class Tvm_Tracker_Plugin {
     }
 
     /**
+     * Returns the database client instance.
+     *
+     * @return Tvm_Tracker_DB
+     */
+    public function get_db_client() {
+        return $this->db_client;
+    }
+
+    /**
      * Constructor.
      */
     public function __construct() {
@@ -99,6 +108,9 @@ class Tvm_Tracker_Plugin {
 
         // Add query vars for clean permalinks.
         add_filter( 'query_vars', array( $this, 'tvm_tracker_add_query_vars' ) );
+        
+        // CRITICAL FIX: Trigger background episode update check on page load.
+        add_action( 'wp', array( $this, 'tvm_tracker_schedule_update_check' ) );
 
         // Register AJAX endpoints.
         add_action( 'wp_ajax_tvm_tracker_toggle_show', array( $this, 'tvm_tracker_toggle_show_callback' ) );
@@ -118,6 +130,11 @@ class Tvm_Tracker_Plugin {
         if ( class_exists( 'Tvm_Tracker_DB' ) ) {
             $this->db_client = new Tvm_Tracker_DB();
         }
+        
+        // CRITICAL: Set the API client on the DB client for V2.0 data population
+        if ( $this->db_client && $this->api_client ) {
+            $this->db_client->tvm_tracker_set_api_client( $this->api_client );
+        }
 
         // Instantiate modules, passing dependencies
         if ( $this->api_client ) {
@@ -125,6 +142,17 @@ class Tvm_Tracker_Plugin {
         }
         if ( $this->api_client && $this->db_client ) {
             $this->shortcode_handler = new Tvm_Tracker_Shortcode( $this->api_client, $this->db_client );
+        }
+    }
+    
+    /**
+     * Executes the weekly update check if needed.
+     * Hooked to 'wp' action to ensure everything is loaded but only runs once per user session.
+     */
+    public function tvm_tracker_schedule_update_check() {
+        if ( $this->db_client ) {
+            // The DB method handles the 7-day frequency check internally.
+            $this->db_client->tvm_tracker_check_for_new_episodes();
         }
     }
 
@@ -143,6 +171,29 @@ class Tvm_Tracker_Plugin {
             'index.php?pagename=$matches[1]&tvm_title_id=$matches[2]',
             'top'
         );
+        
+        // CRITICAL FIX: Rule for: /page-slug/my-shows/movies (Movie Tracker)
+        // Must be specific and placed high up.
+        add_rewrite_rule(
+            '^([^/]+)/my-shows/movies/?$',
+            'index.php?pagename=$matches[1]&tvm_action_view=movies',
+            'top'
+        );
+
+        // Rule for: /page-slug/my-shows/upcoming/agenda (Agenda View)
+        // MUST BE FIRST for highest priority
+        add_rewrite_rule(
+            '^([^/]+)/my-shows/upcoming/agenda/?$',
+            'index.php?pagename=$matches[1]&tvm_action_view=upcoming&tvm_calendar_view=agenda',
+            'top'
+        );
+        
+        // Rule for: /page-slug/my-shows/upcoming (Calendar View - Base URL)
+        add_rewrite_rule(
+            '^([^/]+)/my-shows/upcoming/?$',
+            'index.php?pagename=$matches[1]&tvm_action_view=upcoming',
+            'top'
+        );
 
         // Rule for: /page-slug/my-shows/unwatched
         add_rewrite_rule(
@@ -151,7 +202,7 @@ class Tvm_Tracker_Plugin {
             'top'
         );
 
-        // Rule for: /page-slug/my-shows
+        // Rule for: /page-slug/my-shows (Base Tracker View)
         add_rewrite_rule(
             '^([^/]+)/my-shows/?$',
             'index.php?pagename=$matches[1]&tvm_action_view=tracker',
@@ -168,6 +219,8 @@ class Tvm_Tracker_Plugin {
     public function tvm_tracker_add_query_vars( $vars ) {
         $vars[] = 'tvm_title_id';
         $vars[] = 'tvm_action_view';
+        $vars[] = 'tvm_view'; // Required for list/poster view toggle
+        $vars[] = 'tvm_calendar_view'; // Required for calendar/agenda view toggle
         return $vars;
     }
 
@@ -194,6 +247,10 @@ class Tvm_Tracker_Plugin {
         $is_tracking = isset( $_POST['is_tracking'] ) ? sanitize_text_field( wp_unslash( $_POST['is_tracking'] ) ) : 'false';
         $title_name = isset( $_POST['title_name'] ) ? sanitize_text_field( wp_unslash( $_POST['title_name'] ) ) : '';
         $total_episodes = isset( $_POST['total_episodes'] ) ? absint( $_POST['total_episodes'] ) : 0;
+        // Movie Tracking Fields
+        $item_type = isset( $_POST['item_type'] ) ? sanitize_text_field( wp_unslash( $_POST['item_type'] ) ) : 'tv_series';
+        $release_date = isset( $_POST['release_date'] ) ? sanitize_text_field( wp_unslash( $_POST['release_date'] ) ) : null;
+
 
         if ( empty( $title_id ) || empty( $title_name ) ) {
             wp_send_json_error( array( 'message' => esc_html__( 'Invalid request parameters.', 'tvm-tracker' ) ) );
@@ -209,7 +266,7 @@ class Tvm_Tracker_Plugin {
             $action = 'removed';
         } else {
             // User is not tracking the show, so we add it (toggle on)
-            $db->tvm_tracker_add_show( $user_id, $title_id, $title_name, $total_episodes );
+            $db->tvm_tracker_add_show( $user_id, $title_id, $title_name, $total_episodes, $item_type, $release_date );
             $message = esc_html__( 'Show added to tracker!', 'tvm-tracker' );
             $action = 'added';
         }
@@ -240,6 +297,7 @@ class Tvm_Tracker_Plugin {
         // is_watched is sent as 'true' or 'false' string from JS
         $is_watched = isset( $_POST['is_watched'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['is_watched'] ) );
 
+        // CRITICAL: Ensure both IDs are non-zero
         if ( empty( $title_id ) || empty( $episode_id ) ) {
             wp_send_json_error( array( 'message' => esc_html__( 'Invalid episode or title ID.', 'tvm-tracker' ) ) );
         }
@@ -255,12 +313,12 @@ class Tvm_Tracker_Plugin {
 
         if ( $is_watched ) {
             // Mark episode as watched
-            $db->tvm_tracker_mark_episode_watched( $user_id, $title_id, $episode_id );
+            $db->tvm_tracker_toggle_episode( $user_id, $title_id, $episode_id, true );
             $message = esc_html__( 'Episode marked watched.', 'tvm-tracker' );
             $action = 'watched';
         } else {
             // Mark episode as unwatched
-            $db->tvm_tracker_mark_episode_unwatched( $user_id, $title_id, $episode_id );
+            $db->tvm_tracker_toggle_episode( $user_id, $title_id, $episode_id, false );
             $message = esc_html__( 'Episode marked unwatched.', 'tvm-tracker' );
             $action = 'unwatched';
         }
@@ -269,11 +327,27 @@ class Tvm_Tracker_Plugin {
     }
 
     /**
-     * Uninstall hook to remove options and database tables.
+     * Displays API URLs called if debug mode is enabled.
      */
-    public static function tvm_tracker_uninstall() {
-        if ( class_exists( 'Tvm_Tracker_Installer' ) ) {
-            Tvm_Tracker_Installer::tvm_tracker_uninstall();
+    private function tvm_tracker_display_debug_info() {
+        $is_debug_enabled = get_option( 'tvm_tracker_debug_mode', 0 );
+
+        if ( current_user_can( 'manage_options' ) ) {
+            $urls = $this->api_client->tvm_tracker_get_api_urls_called();
+
+            echo '<div class="tvm-debug-box">';
+            echo '<h4>' . esc_html__( 'DEBUG MODE (API Calls):', 'tvm-tracker' ) . '</h4>';
+
+            if ( ! empty( $urls ) ) {
+                echo '<ol>';
+                foreach ( $urls as $url ) {
+                    echo '<li>' . esc_html( $url ) . '</li>';
+                }
+                echo '</ol>';
+            } else {
+                echo '<p>' . esc_html__( 'No API calls logged on this page.', 'tvm-tracker' ) . '</p>';
+            }
+            echo '</div>';
         }
     }
 }
