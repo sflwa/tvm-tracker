@@ -5,7 +5,7 @@
  *
  * @package Tvm_Tracker
  * @subpackage Includes
- * @version 2.0.9
+ * @version 2.1.2
  */
 
 // Exit if accessed directly.
@@ -63,9 +63,10 @@ class Tvm_Tracker_DB {
      * @param int $total_episodes The total number of episodes (0 for movies).
      * @param string $item_type The Watchmode item type ('movie', 'tv_series', etc.).
      * @param string $release_date Movie release date (YYYY-MM-DD), empty for series.
+     * @param bool $is_watched Whether the movie has been watched (1) or is 'want to see' (0).
      * @return bool|int True on success, False on failure, or row ID on insert.
      */
-    public function tvm_tracker_add_show( $user_id, $title_id, $title_name, $total_episodes, $item_type = 'tv_series', $release_date = null ) {
+    public function tvm_tracker_add_show( $user_id, $title_id, $title_name, $total_episodes, $item_type = 'tv_series', $release_date = null, $is_watched = false ) {
         global $wpdb;
 
         // 1. CRITICAL: Populate static data first to get the end_year (for series)
@@ -83,8 +84,9 @@ class Tvm_Tracker_DB {
                 'end_year'       => $end_year, // Store end year status
                 'item_type'      => sanitize_text_field( $item_type ), // Store item type
                 'release_date'   => sanitize_text_field( $release_date ), // Store movie release date
+                'is_watched'     => (int) $is_watched, // Store watched status (0 or 1)
             ),
-            array( '%d', '%d', '%s', '%d', '%s', '%s', '%s', '%s' )
+            array( '%d', '%d', '%s', '%d', '%s', '%s', '%s', '%s', '%d' )
         );
 
         return $result;
@@ -136,7 +138,7 @@ class Tvm_Tracker_DB {
     }
     
     /**
-     * Retrieves the list of all tracked shows (TV/Movie) for the user.
+     * Retrieves the list of all tracked shows (TV Series) for the user.
      *
      * @param int $user_id The current user ID.
      * @return array|object|null Array of tracked show objects, or empty array.
@@ -164,6 +166,29 @@ class Tvm_Tracker_DB {
         );
         return $wpdb->get_results( $sql );
     }
+
+    /**
+     * Updates the watched status of a tracked movie.
+     *
+     * @param int $user_id The current user ID.
+     * @param int $title_id The Watchmode title ID.
+     * @param bool $is_watched True for watched (1), false for want to see (0).
+     * @return bool True on success, False on failure.
+     */
+    public function tvm_tracker_toggle_movie_watched( $user_id, $title_id, $is_watched ) {
+        global $wpdb;
+
+        $result = $wpdb->update(
+            $this->table_shows,
+            array( 'is_watched' => (int) $is_watched ),
+            array( 'user_id' => absint( $user_id ), 'title_id' => absint( $title_id ) ),
+            array( '%d' ),
+            array( '%d', '%d' )
+        );
+
+        return $result !== false;
+    }
+
 
     // =======================================================================
     // STATIC DATA POPULATION & UPDATE LOGIC (CRITICAL V2.0 LOGIC)
