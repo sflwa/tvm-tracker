@@ -3,11 +3,11 @@
  *
  * Handles:
  * 1. Toggling of season and episode collapsible sections.
- * 2. AJAX requests for adding/removing a show from the tracker.
- * 3. AJAX requests for marking an episode as watched/unwatched.
+ * 2. AJAX requests for adding/removing a show/movie from the tracker.
+ * 3. AJAX requests for marking an episode/movie as watched/unwatched.
  * 4. AJAX requests for loading unwatched episode details on the Unwatched View.
  *
- * @since 1.3.4
+ * @since 1.4.0
  */
 
 jQuery(document).ready(function($) {
@@ -23,7 +23,6 @@ jQuery(document).ready(function($) {
 
     /**
      * Shows a localized status message near the target container.
-     * This function is designed to display messages above the single results box.
      * @param {string} message The message to display.
      * @param {string} type 'success' or 'error'.
      * @param {jQuery} $containerElement The container (#tvm-episode-results) to place the message before.
@@ -69,7 +68,7 @@ jQuery(document).ready(function($) {
     // Handler for both season and episode headers
     $('.tvm-tracker-container').on('click', '.tvm-season-header, .tvm-episode-header', function(e) {
         // Prevent action if a child interactive element was clicked (buttons, anchors, or the episode toggle button)
-        if ($(e.target).is('button, a, .tvm-episode-toggle')) {
+        if ($(e.target).is('button, a, .tvm-episode-toggle, #tvm-movie-toggle-watched')) {
             return;
         }
 
@@ -92,7 +91,7 @@ jQuery(document).ready(function($) {
     });
 
     // --- Show Tracking Toggle (Add/Remove from Tracker) ---
-    // Delegated click handler for the tracker toggle button
+    // Delegated click handler for the main tracker toggle button
     $('.tvm-tracker-container').on('click', '#tvm-tracker-toggle', function(e) {
         e.preventDefault();
         const $button = $(this);
@@ -102,9 +101,17 @@ jQuery(document).ready(function($) {
         const titleId = $button.data('title-id');
         const titleName = $button.data('title-name');
         const totalEpisodes = $button.data('total-episodes');
-        const itemType = $button.data('item-type'); // NEW: Get item type
-        const releaseDate = $button.data('release-date'); // NEW: Get release date (for movies)
-        
+        const itemType = $button.data('item-type');
+        const releaseDate = $button.data('release-date');
+        // V2.1 MOVIE FIX: Determine movie watched status upon adding
+        let isMovieWatched = 'false'; 
+        if (itemType !== 'tv_series' && !isTracking) {
+             // For movies being added, check if the user intends to mark it as seen immediately (default: false/want to see)
+             // We'll update this when the separate "Watched" button is available on the detail page (Issue #3)
+             // For now, we default to 'want to see' (false)
+        }
+
+
         const data = {
             action: 'tvm_tracker_toggle_show',
             nonce: tvmTrackerAjax.nonce,
@@ -112,8 +119,9 @@ jQuery(document).ready(function($) {
             title_name: titleName,
             total_episodes: totalEpisodes,
             is_tracking: isTracking ? 'true' : 'false',
-            item_type: itemType, // NEW
-            release_date: releaseDate // NEW
+            item_type: itemType, 
+            release_date: releaseDate,
+            is_movie_watched: isMovieWatched 
         };
 
         $.post(tvmTrackerAjax.ajax_url, data)
@@ -141,18 +149,64 @@ jQuery(document).ready(function($) {
             });
     });
 
+    // --- Movie Watched Status Toggle (Details Page Button) ---
+    $('.tvm-tracker-container').on('click', '#tvm-movie-toggle-watched', function(e) {
+        e.preventDefault();
+        const $button = $(this);
+        $button.prop('disabled', true).text('Processing...');
+
+        const titleId = parseInt($button.data('title-id'));
+        const isCurrentlyWatched = $button.data('is-watched') === true;
+        const newStateWatched = !isCurrentlyWatched;
+        
+        const data = {
+            action: 'tvm_tracker_toggle_movie_watched', // NEW AJAX action
+            nonce: tvmTrackerAjax.nonce,
+            title_id: titleId,
+            is_watched: newStateWatched ? 'true' : 'false'
+        };
+
+        $.post(tvmTrackerAjax.ajax_url, data)
+            .done(function(response) {
+                if (response.success) {
+                    // Update button UI
+                    const newButtonText = newStateWatched ? 'Mark Want To See' : 'Mark Watched';
+                    $button.text(newButtonText).data('is-watched', newStateWatched);
+                    
+                    // Update the visible status label on the details page
+                    const statusText = newStateWatched ? 'Seen It' : 'Want To See';
+                    $('.tvm-movie-status-label').text(statusText);
+                    
+                    showGlobalStatusMessage(response.data.message || 'Movie status updated.', 'success');
+                } else {
+                    showGlobalStatusMessage(response.data.message || 'An unknown server error occurred.', 'error');
+                }
+            })
+            .fail(function() {
+                 showGlobalStatusMessage('AJAX Request Failed.', 'error');
+            })
+            .always(function() {
+                $button.prop('disabled', false);
+            });
+    });
+
     // --- Episode Watch Status Toggle (Details Page Button) ---
+    // Handles button clicks on the detail page episodes
     $('.tvm-tracker-container').on('click', '.tvm-episode-toggle', function(e) {
         e.preventDefault();
         const $button = $(this);
         $button.prop('disabled', true).text('Processing...');
 
-        const titleId = $button.data('title-id');
-        const episodeId = $button.data('episode-id');
+        // CRITICAL FIX: Ensure IDs are parsed as integers to prevent 400 error
+        const titleId = parseInt($button.data('title-id'));
+        const episodeId = parseInt($button.data('episode-id'));
+        
         const isCurrentlyWatched = $button.data('is-watched') === true;
         
+        // Determine the action: we want the *new* state.
         const newStateWatched = !isCurrentlyWatched;
         
+        // Data to send via AJAX
         const data = {
             action: 'tvm_tracker_toggle_episode',
             nonce: tvmTrackerAjax.nonce,
@@ -173,9 +227,11 @@ jQuery(document).ready(function($) {
                            .addClass(newButtonClass)
                            .data('is-watched', newStateWatched);
                     
+                    // Show message near the button/episode
                     showGlobalStatusMessage(response.data.message || 'Updated status.', 'success');
 
                 } else {
+                    // Error: Show message near the button/episode
                     showGlobalStatusMessage(response.data.message || 'An unknown server error occurred.', 'error');
                 }
             })
