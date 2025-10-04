@@ -5,7 +5,7 @@
  *
  * @package Tvm_Tracker
  * @subpackage Includes
- * @version 2.1.0
+ * @version 2.1.2
  */
 
 // Exit if accessed directly.
@@ -24,7 +24,7 @@ class Tvm_Tracker_Installer {
      *
      * @var string
      */
-    const DB_VERSION = '2.1.0'; // Bumped version to ensure columns are added
+    const DB_VERSION = '2.1.2'; // Bumped version for is_watched column
 
     /**
      * Installs the necessary database tables.
@@ -49,6 +49,7 @@ class Tvm_Tracker_Installer {
             end_year YEAR(4) DEFAULT NULL,
             item_type VARCHAR(50) NOT NULL DEFAULT 'tv_series',
             release_date DATE DEFAULT NULL,
+            is_watched TINYINT(1) UNSIGNED NOT NULL DEFAULT 0,
             PRIMARY KEY (id),
             KEY user_id (user_id),
             KEY title_id (title_id)
