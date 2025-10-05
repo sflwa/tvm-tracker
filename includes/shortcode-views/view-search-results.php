@@ -16,7 +16,9 @@ $results = $api_client->tvm_tracker_search( $search_query );
 echo '<h3>' . sprintf( esc_html__( 'Search Results for: %s', 'tvm-tracker' ), esc_html( $search_query ) ) . '</h3>';
 
 echo '<div class="tvm-details-actions" style="justify-content: flex-start; margin-bottom: 20px;">';
-echo '<a href="' . esc_url( $my_tracker_url ) . '" class="tvm-button tvm-button-back">' . esc_html__( 'My Tracker', 'tvm-tracker' ) . '</a>';
+echo '<a href="' . esc_url( $my_tracker_url ) . '" class="tvm-button tvm-button-details">' . esc_html__( 'My Tracker', 'tvm-tracker' ) . '</a>';
+// NEW SEARCH BUTTON ADDED
+echo '<a href="' . esc_url( $permalink ) . '" class="tvm-button tvm-button-back">' . esc_html__( 'New Search', 'tvm-tracker' ) . '</a>';
 echo '</div>';
 
 

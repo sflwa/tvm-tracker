@@ -117,6 +117,10 @@ class Tvm_Tracker_Plugin {
         add_action( 'wp_ajax_nopriv_tvm_tracker_toggle_show', array( $this, 'tvm_tracker_toggle_show_callback' ) );
         add_action( 'wp_ajax_tvm_tracker_toggle_episode', array( $this, 'tvm_tracker_toggle_episode_callback' ) );
         add_action( 'wp_ajax_nopriv_tvm_tracker_toggle_episode', array( $this, 'tvm_tracker_toggle_episode_callback' ) );
+        add_action( 'wp_ajax_tvm_tracker_toggle_movie_watched', array( $this, 'tvm_tracker_toggle_movie_watched_callback' ) ); // NEW
+        add_action( 'wp_ajax_nopriv_tvm_tracker_toggle_movie_watched', array( $this, 'tvm_tracker_toggle_movie_watched_callback' ) ); // NEW
+        add_action( 'wp_ajax_tvm_tracker_toggle_bulk_episodes', array( $this, 'tvm_tracker_toggle_bulk_episodes_callback' ) ); // NEW
+        add_action( 'wp_ajax_nopriv_tvm_tracker_toggle_bulk_episodes', array( $this, 'tvm_tracker_toggle_bulk_episodes_callback' ) ); // NEW
     }
 
     /**
@@ -173,7 +177,6 @@ class Tvm_Tracker_Plugin {
         );
         
         // CRITICAL FIX: Rule for: /page-slug/my-shows/movies (Movie Tracker)
-        // Must be specific and placed high up.
         add_rewrite_rule(
             '^([^/]+)/my-shows/movies/?$',
             'index.php?pagename=$matches[1]&tvm_action_view=movies',
@@ -221,6 +224,7 @@ class Tvm_Tracker_Plugin {
         $vars[] = 'tvm_action_view';
         $vars[] = 'tvm_view'; // Required for list/poster view toggle
         $vars[] = 'tvm_calendar_view'; // Required for calendar/agenda view toggle
+        $vars[] = 'tvm_movie_tab'; // Required for movie tab view
         return $vars;
     }
 
@@ -250,6 +254,10 @@ class Tvm_Tracker_Plugin {
         // Movie Tracking Fields
         $item_type = isset( $_POST['item_type'] ) ? sanitize_text_field( wp_unslash( $_POST['item_type'] ) ) : 'tv_series';
         $release_date = isset( $_POST['release_date'] ) ? sanitize_text_field( wp_unslash( $_POST['release_date'] ) ) : null;
+        
+        // Determine the boolean status for movie watched (true if string 'true' is received)
+        // This resolves the issue where 'Seen It' button didn't set is_watched=1 on add.
+        $is_movie_watched = isset( $_POST['is_movie_watched'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['is_movie_watched'] ) );
 
 
         if ( empty( $title_id ) || empty( $title_name ) ) {
@@ -266,7 +274,8 @@ class Tvm_Tracker_Plugin {
             $action = 'removed';
         } else {
             // User is not tracking the show, so we add it (toggle on)
-            $db->tvm_tracker_add_show( $user_id, $title_id, $title_name, $total_episodes, $item_type, $release_date );
+            // CRITICAL FIX: Pass the movie watched status ($is_movie_watched) to the add function.
+            $db->tvm_tracker_add_show( $user_id, $title_id, $title_name, $total_episodes, $item_type, $release_date, $is_movie_watched );
             $message = esc_html__( 'Show added to tracker!', 'tvm-tracker' );
             $action = 'added';
         }
@@ -325,6 +334,111 @@ class Tvm_Tracker_Plugin {
 
         wp_send_json_success( array( 'message' => $message, 'action' => $action ) );
     }
+
+    /**
+     * AJAX callback to toggle a movie's watched/unwatched status.
+     * wp_ajax_tvm_tracker_toggle_movie_watched
+     */
+    public function tvm_tracker_toggle_movie_watched_callback() {
+        if ( ! is_user_logged_in() ) {
+            wp_send_json_error( array( 'message' => esc_html__( 'Authentication required.', 'tvm-tracker' ) ) );
+        }
+
+        $user_id = get_current_user_id();
+
+        // 1. Nonce Verification
+        if ( ! check_ajax_referer( 'tvm_tracker_ajax_nonce', 'nonce', false ) ) {
+            wp_send_json_error( array( 'message' => esc_html__( 'Security check failed.', 'tvm-tracker' ) ) );
+        }
+
+        // 2. Parameter Validation
+        $title_id = isset( $_POST['title_id'] ) ? absint( $_POST['title_id'] ) : 0;
+        // is_watched is sent as 'true' or 'false' string from JS
+        $is_watched = isset( $_POST['is_watched'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['is_watched'] ) );
+
+        if ( empty( $title_id ) ) {
+            wp_send_json_error( array( 'message' => esc_html__( 'Invalid title ID.', 'tvm-tracker' ) ) );
+        }
+
+        $db = $this->db_client;
+        $action = $is_watched ? 'watched' : 'unwatched';
+        $message = $is_watched ? esc_html__( 'Movie status updated to: Seen It.', 'tvm-tracker' ) : esc_html__( 'Movie status updated to: Want to See.', 'tvm-tracker' );
+
+        // 3. Perform the DB update (method defined in class-tvm-tracker-db.php)
+        $success = $db->tvm_tracker_toggle_movie_watched( $user_id, $title_id, $is_watched );
+
+        if ( $success ) {
+            wp_send_json_success( array( 'message' => $message, 'action' => $action ) );
+        } else {
+            wp_send_json_error( array( 'message' => esc_html__( 'Failed to update movie status in database.', 'tvm-tracker' ) ) );
+        }
+    }
+    
+    /**
+     * AJAX callback to toggle all episodes in a season or a series watched/unwatched.
+     * wp_ajax_tvm_tracker_toggle_bulk_episodes
+     */
+    public function tvm_tracker_toggle_bulk_episodes_callback() {
+        if ( ! is_user_logged_in() ) {
+            wp_send_json_error( array( 'message' => esc_html__( 'Authentication required.', 'tvm-tracker' ) ) );
+        }
+
+        $user_id = get_current_user_id();
+
+        // 1. Nonce Verification
+        if ( ! check_ajax_referer( 'tvm_tracker_ajax_nonce', 'nonce', false ) ) {
+            wp_send_json_error( array( 'message' => esc_html__( 'Security check failed.', 'tvm-tracker' ) ) );
+        }
+
+        // 2. Parameter Validation
+        $title_id = isset( $_POST['title_id'] ) ? absint( $_POST['title_id'] ) : 0;
+        $target_type = isset( $_POST['target_type'] ) ? sanitize_text_field( wp_unslash( $_POST['target_type'] ) ) : ''; // 'series' or 'season'
+        $season_number = isset( $_POST['season_number'] ) ? absint( $_POST['season_number'] ) : 0;
+        $is_watched = isset( $_POST['is_watched'] ) && 'true' === sanitize_text_field( wp_unslash( $_POST['is_watched'] ) );
+
+        if ( empty( $title_id ) || ( $target_type === 'season' && empty( $season_number ) ) ) {
+            wp_send_json_error( array( 'message' => esc_html__( 'Invalid request parameters for bulk update.', 'tvm-tracker' ) ) );
+        }
+
+        $db = $this->db_client;
+        $success = false;
+
+        if ($target_type === 'series') {
+            $success = $db->tvm_tracker_toggle_series_bulk( $user_id, $title_id, $is_watched );
+            
+            // FIX: Added translator comment before sprintf for watched state
+            /* translators: 1: 'watched' or 'unwatched' status verb */
+            $message = $is_watched 
+                ? esc_html__('All airing episodes marked watched.', 'tvm-tracker') 
+                : esc_html__('All episodes marked unwatched.', 'tvm-tracker');
+        } elseif ($target_type === 'season') {
+            $success = $db->tvm_tracker_toggle_season_bulk( $user_id, $title_id, $season_number, $is_watched );
+            
+            // FIX: Added translator comment before sprintf for watched state
+            /* translators: 1: Season number, 2: 'watched' or 'unwatched' status verb */
+            $message = $is_watched 
+                ? sprintf(
+                    /* Translators: %d is the season number. */
+                    esc_html__("All airing episodes in Season %d marked watched.", 'tvm-tracker'), 
+                    $season_number
+                )
+                : sprintf(
+                    /* Translators: %d is the season number. */
+                    esc_html__("All episodes in Season %d marked unwatched.", 'tvm-tracker'), 
+                    $season_number
+                );
+        } else {
+             wp_send_json_error( array( 'message' => esc_html__( 'Invalid bulk target type.', 'tvm-tracker' ) ) );
+        }
+
+
+        if ( $success ) {
+            wp_send_json_success( array( 'message' => $message, 'action' => $is_watched ? 'watched' : 'unwatched' ) );
+        } else {
+             wp_send_json_error( array( 'message' => esc_html__( 'Bulk update failed.', 'tvm-tracker' ) ) );
+        }
+    }
+
 
     /**
      * Displays API URLs called if debug mode is enabled.

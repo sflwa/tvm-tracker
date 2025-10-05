@@ -1,7 +1,6 @@
-
 /**
  * TVM Tracker Frontend Styles
- * Version: 1.0.15
+ * Version: 1.0.19 (Includes Stats, Tabs, and Movie Layout)
  */
 
 /* --- General Structure & Typography --- */
@@ -102,43 +101,10 @@
     white-space: nowrap;
 }
 
-.tvm-button-details, .tvm-button-back, #tvm-tracker-toggle, .tvm-button-view, .tvm-button-view-active {
+.tvm-button-details, .tvm-button-back, .tvm-toggle-show-btn, #tvm-movie-toggle-watched, .tvm-button-view, .tvm-button-view-active {
     background-color: #0073aa;
     color: #fff;
     margin-left: 10px;
-}
-
-/* Tracked Page Toggle Buttons */
-.tvm-view-toggles {
-    margin-bottom: 20px;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 10px;
-    text-align: center;
-}
-.tvm-view-toggles a {
-    margin: 0 5px;
-}
-.tvm-button-view-active {
-    background-color: #005177;
-}
-
-.tvm-button-details:hover, .tvm-button-back:hover, #tvm-tracker-toggle:hover, .tvm-button-view:hover {
-    background-color: #005177;
-    color: #fff;
-}
-
-.tvm-button-search {
-    background-color: #46b450;
-    color: #fff;
-    padding: 8px 15px;
-    border-radius: 4px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-}
-
-.tvm-button-search:hover {
-    background-color: #3b9343;
 }
 
 /* Tracking Status Buttons */
@@ -161,18 +127,19 @@
     color: #fff;
 }
 
-/* --- Details Page Layout --- */
+/* --- Detail & Tracker Header Layout (Combined for Series/Movie) --- */
 .tvm-details-header {
     display: flex;
-    flex-wrap: wrap; 
+    flex-direction: column; /* Stacked header on mobile/default */
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     border-bottom: 2px solid #eee;
     padding-bottom: 10px;
     margin-bottom: 20px;
 }
 
-.tvm-details-header h2 {
+.tvm-details-header h2,
+.tvm-tracker-list-header h3 {
     flex-grow: 1;
     margin: 0;
     line-height: 1.4;
@@ -180,12 +147,71 @@
     font-size: 1.8em;
 }
 
+/* CRITICAL FIX: Restructure Header Actions */
 .tvm-details-actions {
+    /* Use flexbox for the outer container */
+    display: flex;
+    flex-wrap: wrap; /* Allow wrapping on small screens */
+    align-items: center;
+    gap: 10px; /* Gap between the two button groups */
+    margin-top: 5px; 
+    flex-grow: 1;
+    justify-content: flex-end; /* Align groups to the right */
+}
+
+/* Grouping container for the navigation buttons (Upcoming, Unwatched, Search) */
+.tvm-navigation-btns {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-top: 5px; 
+    /* Ensure this group stays to the left of the type toggles if space permits */
+    margin-right: auto;
 }
+
+/* Grouping container for the series/movie toggle buttons (tvm-inline-toggles is the new class) */
+.tvm-inline-toggles {
+    /* Reset the margins from the old .tvm-type-toggles block */
+    margin-top: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+    padding-bottom: 0;
+    text-align: right;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+/* Ensure margin is only on the right side of the buttons *between* groups */
+.tvm-navigation-btns .tvm-button {
+    margin-left: 0;
+}
+.tvm-inline-toggles .tvm-button {
+    margin-left: 0;
+}
+
+/* Ensure buttons in tvm-details-actions have no left margin when grouped */
+.tvm-details-actions > a {
+    margin-left: 0;
+}
+
+@media (max-width: 768px) {
+    /* On smaller screens, force the button groups to stack */
+    .tvm-details-actions {
+        flex-direction: column;
+        align-items: flex-start;
+        width: 100%;
+    }
+    .tvm-navigation-btns,
+    .tvm-inline-toggles {
+        width: 100%;
+        margin-bottom: 10px;
+        /* Re-enable margin for spacing when stacked */
+        gap: 8px;
+    }
+    .tvm-details-header h2 {
+        width: 100%;
+    }
+}
+
 
 .tvm-details-content-main {
     display: flex;
@@ -342,7 +368,6 @@
     white-space: nowrap;
 }
 
-/* --- My Tracker (Poster View) --- */
 /* --- My Tracker (Poster View) --- */
 .tvm-poster-grid {
     display: grid;
@@ -556,4 +581,251 @@
     color: #555;
     margin-top: 10px;
     line-height: 1.4;
+}
+
+/* --- Global Stats Dashboard (Used by My Tracker - Series/Movie) --- */
+.tvm-global-stats-dashboard {
+    background-color: #fcfcfc;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 25px;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    flex-wrap: wrap; /* Allows wrapping on smaller screens */
+    gap: 15px;
+}
+
+.tvm-stat-item {
+    text-align: center;
+    flex-grow: 1;
+    min-width: 150px;
+}
+
+.tvm-stat-label {
+    font-size: 0.9em;
+    font-weight: 500;
+    color: #666;
+    margin-bottom: 5px;
+    display: block;
+}
+
+.tvm-stat-number {
+    font-size: 1.8em;
+    font-weight: 700;
+    color: #0073aa;
+    line-height: 1.1;
+}
+
+.tvm-progress-bar-container {
+    width: 100%;
+    background-color: #ddd;
+    border-radius: 5px;
+    overflow: hidden;
+    height: 8px;
+    margin-top: 5px;
+}
+
+.tvm-progress-bar {
+    height: 100%;
+    background-color: #46b450;
+    transition: width 0.5s ease-out;
+}
+
+/* --- Seasons and Episodes Collapsible UI --- */
+.tvm-seasons-episodes h3 {
+    border-bottom: 2px solid #eee;
+    padding-bottom: 5px;
+    margin-bottom: 15px;
+}
+
+.tvm-series-bulk-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 15px;
+    gap: 10px;
+}
+
+.tvm-season, .tvm-episode {
+    border: 1px solid #f0f0f0;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.tvm-season-header, .tvm-episode-header {
+    display: flex;
+    justify-content: space-between; 
+    align-items: center;
+    cursor: pointer;
+    padding: 10px 15px;
+    background-color: #f7f7f7;
+    border-bottom: 1px solid #eee;
+    font-weight: 600;
+    transition: background-color 0.2s;
+}
+
+.tvm-season-header h4 {
+    margin: 0;
+    font-size: 1.1em;
+    flex-grow: 1;
+}
+
+.tvm-season-actions {
+    display: flex;
+    gap: 5px; /* Tighter grouping for season toggle buttons */
+}
+
+.tvm-season-header:hover, .tvm-episode-header:hover {
+    background-color: #f0f0f0;
+}
+
+/* Hide content initially, JS handles slideToggle */
+.tvm-season-content, .tvm-episode-content {
+    display: none; 
+    padding: 15px;
+    background-color: #fff;
+    border-top: none;
+}
+
+/* --- Movie Tracker Tabs --- */
+.tvm-movie-tabs {
+    display: flex;
+    border-bottom: 2px solid #eee;
+    margin-bottom: 20px;
+}
+
+.tvm-movie-tab-btn {
+    padding: 10px 20px;
+    cursor: pointer;
+    font-weight: 600;
+    color: #666;
+    border: none;
+    background: transparent;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    margin-right: 10px;
+    font-size: 1.0em;
+}
+
+.tvm-movie-tab-btn:hover {
+    color: #0073aa;
+}
+
+.tvm-movie-tab-btn.is-active {
+    color: #0073aa;
+    border-bottom: 2px solid #0073aa;
+    margin-bottom: -2px; /* Ensure line overlaps border */
+}
+
+.tvm-tab-content {
+    display: none; /* JS toggles visibility */
+}
+
+.tvm-tab-content.is-active {
+    display: block;
+}
+
+/* --- New Movie List Grid (Want to See) --- */
+.tvm-movie-list-grid {
+    display: grid;
+    /* Two columns, responsive gap */
+    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+    gap: 25px;
+    margin-top: 20px;
+}
+
+.tvm-movie-list-item {
+    display: flex;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: #f9f9f9;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.tvm-movie-list-poster {
+    flex-shrink: 0;
+    width: 100px;
+    height: 150px;
+    object-fit: cover;
+}
+
+.tvm-movie-list-info {
+    padding: 15px;
+    flex-grow: 1;
+}
+
+.tvm-movie-list-info h4 {
+    margin-top: 0;
+    margin-bottom: 5px;
+    font-size: 1.2em;
+}
+
+.tvm-movie-list-sources {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.tvm-movie-list-sources h5 {
+    font-size: 0.9em;
+    font-weight: 600;
+    color: #555;
+    margin: 0;
+}
+
+.tvm-movie-list-source-logo {
+    width: 30px; 
+    height: 30px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid #000;
+}
+
+/* --- Standard Poster Grid (Upcoming / Watched) --- */
+.tvm-poster-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+    justify-content: start;
+}
+
+.tvm-poster-item {
+    display: block;
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s;
+    text-decoration: none;
+}
+
+.tvm-poster-item:hover {
+    transform: scale(1.03);
+}
+
+.tvm-poster-item img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 8px;
+}
+
+.tvm-poster-progress-overlay {
+    position: absolute;
+    top: 5px; 
+    right: 5px; 
+    background-color: rgba(255, 255, 255, 0.95); 
+    color: #000; 
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 0.8em;
+    line-height: 1.2;
+    border: 1px solid #ddd;
 }

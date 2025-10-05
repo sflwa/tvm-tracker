@@ -525,15 +525,14 @@ class Tvm_Tracker_DB {
 
         if ( $is_watched ) {
             // INSERT: Mark as watched (add row to tracking table)
-            $result = $wpdb->insert(
-                $this->table_episodes,
-                array(
-                    'user_id'    => $user_id,
-                    'title_id'   => $title_id,
-                    'episode_id' => $episode_id,
-                ),
-                array( '%d', '%d', '%d' )
-            );
+            // Use REPLACE INTO to ensure idempotency (prevent duplicate inserts if called twice)
+            $result = $wpdb->query( $wpdb->prepare(
+                "REPLACE INTO {$this->table_episodes} (user_id, title_id, episode_id) VALUES (%d, %d, %d)",
+                $user_id,
+                $title_id,
+                $episode_id
+            ) );
+
         } else {
             // DELETE: Mark as unwatched (remove row from tracking table)
             $result = $wpdb->delete(
@@ -546,6 +545,68 @@ class Tvm_Tracker_DB {
                 array( '%d', '%d', '%d' )
             );
         }
+        return $result !== false;
+    }
+
+    /**
+     * Bulk marks all episodes in a season or series as watched/unwatched.
+     *
+     * @param int $user_id The current user ID.
+     * @param int $title_id The Watchmode title ID.
+     * @param bool $is_watched True to mark as watched, False to mark as unwatched.
+     * @param int|null $season_number Optional. If provided, only affects this season.
+     * @return bool True on success, False on failure.
+     */
+    public function tvm_tracker_toggle_bulk_episodes( $user_id, $title_id, $is_watched, $season_number = null ) {
+        global $wpdb;
+
+        $user_id = absint( $user_id );
+        $title_id = absint( $title_id );
+
+        // 1. Get all episode IDs (watchmode_id) for the target scope (title or season)
+        $where_clause = $wpdb->prepare( "title_id = %d", $title_id );
+        if ( ! is_null( $season_number ) ) {
+            $season_number = absint( $season_number );
+            $where_clause .= $wpdb->prepare( " AND season_number = %d", $season_number );
+        }
+        
+        // Fetch episode IDs that have already aired (air_date <= today and not '0000-00-00')
+        $today = date_i18n('Y-m-d');
+        $airing_clause = $wpdb->prepare( "AND air_date <= %s AND air_date != %s", $today, '0000-00-00' );
+
+
+        $sql_episodes = "SELECT watchmode_id FROM {$this->table_episode_data} WHERE {$where_clause} {$airing_clause}";
+        $episode_ids = $wpdb->get_col( $sql_episodes );
+
+        if ( empty( $episode_ids ) ) {
+            // No episodes found or none have aired yet, return success
+            return true;
+        }
+
+        $episode_ids_in = implode( ',', array_map( 'absint', $episode_ids ) );
+        
+        if ( $is_watched ) {
+            // BULK INSERT (Mark Watched)
+            // Use INSERT IGNORE to prevent conflicts with UNIQUE KEY (user_episode)
+            $values_sql = [];
+            foreach ( $episode_ids as $episode_id ) {
+                $values_sql[] = $wpdb->prepare( '(%d, %d, %d)', $user_id, $title_id, absint( $episode_id ) );
+            }
+            $values_string = implode( ', ', $values_sql );
+
+            $sql_insert = "INSERT IGNORE INTO {$this->table_episodes} (user_id, title_id, episode_id) VALUES {$values_string}";
+            $result = $wpdb->query( $sql_insert );
+
+        } else {
+            // BULK DELETE (Mark Unwatched)
+            $sql_delete = $wpdb->prepare(
+                "DELETE FROM {$this->table_episodes} WHERE user_id = %d AND title_id = %d AND episode_id IN ({$episode_ids_in})",
+                $user_id,
+                $title_id
+            );
+            $result = $wpdb->query( $sql_delete );
+        }
+
         return $result !== false;
     }
 }
