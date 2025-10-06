@@ -3,7 +3,7 @@
  * TVM Tracker Admin Styles
  * Stylesheet for the plugin settings page.
  *
- * @version 1.0.9
+ * @version 1.3.0
  */
 ?>
 /* --- General Admin Styles --- */
@@ -16,104 +16,179 @@
     margin-top: 10px;
 }
 
-/* --- Source Selection Grid --- */
-.tvm-source-selection-container {
-    display: flex;
-    flex-wrap: wrap;
+/* --- GRID BASE --- */
+
+.tvm-12-column-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
     gap: 15px;
     margin-top: 15px;
 }
+.tvm-grid-item {
+    /* Each item spans 1 column by default in the 12-column grid */
+    grid-column: span 1; 
+}
+@media (max-width: 1200px) {
+    .tvm-12-column-grid {
+        grid-template-columns: repeat(10, 1fr);
+    }
+    .tvm-grid-item {
+        grid-column: span 2;
+    }
+}
+@media (max-width: 900px) {
+    .tvm-12-column-grid {
+        grid-template-columns: repeat(6, 1fr);
+    }
+    .tvm-grid-item {
+        grid-column: span 1;
+    }
+}
+@media (max-width: 600px) {
+    .tvm-12-column-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+    .tvm-grid-item {
+        grid-column: span 1;
+    }
+}
 
-/* Base Card Styling */
-.tvm-source-card {
+
+/* --- SECTION 1: REGION SELECTOR CARDS --- */
+.tvm-region-card {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    width: 120px; /* Fixed width for visual cards */
-    height: 140px; /* Fixed height for consistency */
-    padding: 10px;
-    border: 2px solid #ddd;
-    border-radius: 8px;
+    width: 100%;
+    padding: 10px 5px;
+    border: 2px solid #333; /* Default black border */
+    border-radius: 4px;
     cursor: pointer;
     background-color: #f9f9f9;
     position: relative;
-    overflow: hidden;
     transition: all 0.2s ease-in-out;
+    height: 100%; /* Ensures all cards in the grid have the same height */
 }
-
-.tvm-source-card:hover {
+.tvm-region-card:hover {
     border-color: #0073aa;
     background-color: #f0f8ff;
 }
 
-/* Hide the actual checkbox input completely, but ensure it's functional */
-.tvm-source-card input[type="checkbox"] {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    top: 0;
-    left: 0;
-    margin: 0;
-    cursor: pointer;
-    z-index: 2; /* Ensure the hidden input covers the card for clicking */
-}
-
-/* Source Logo */
-.tvm-source-logo {
-    width: 60px;
-    height: 60px;
-    object-fit: cover;
-    border-radius: 50%;
-    margin-bottom: 5px;
-    border: 1px solid #eee;
-    transition: all 0.2s;
-}
-
-.tvm-source-name {
-    font-size: 0.9em;
+.tvm-region-name {
+    font-size: 0.8em;
     font-weight: 600;
     color: #333;
+    line-height: 1.2;
+    margin-top: 5px;
 }
 
-/* Status Icon Styling */
-.tvm-source-status {
-    position: absolute;
-    top: -10px;
-    right: -10px;
-    font-size: 1.2em;
-    padding: 5px;
-    border-radius: 0 8px 0 0;
-    transition: opacity 0.2s;
+.tvm-region-card .tvm-flag-emoji {
+    font-size: 32px; /* Larger flag emoji */
+    line-height: 1;
+    /* Remove redundant border styling from the emoji span here, as it is inherited and only one border is needed */
+    border: none !important; 
+    padding: 0 !important;
 }
 
-/* --- ENABLED STATE STYLES (The Fix) --- */
+/* REGION ENABLED STATE */
+.tvm-region-card.is-enabled {
+    border-color: #46b450; /* Green border when selected */
+    background-color: #e6ffed;
+}
 
-/* Highlight the entire card when checked */
-.tvm-source-card.is-enabled {
+/* --- SECTION 2/3: SERVICE CARDS (Subscription/Free) --- */
+
+.tvm-service-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    width: 100%;
+    padding: 10px 5px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    background-color: #fff;
+    position: relative;
+    transition: all 0.2s ease-in-out;
+    height: 100%;
+}
+.tvm-service-card:hover {
+    border-color: #0073aa;
+}
+
+.tvm-service-logo {
+    width: 50px;
+    height: 50px;
+    object-fit: cover;
+    border-radius: 50%; /* Standard logo shape */
+    margin-bottom: 5px;
+    border: 1px solid #eee;
+}
+
+.tvm-service-name {
+    font-size: 0.8em;
+    font-weight: 500;
+}
+
+/* SERVICE ENABLED STATE */
+.tvm-service-card.is-enabled {
     border-color: #46b450;
     background-color: #e6ffed;
 }
 
-/* Style the checkmark */
-.tvm-source-card.is-enabled .dashicons-yes {
-    color: #46b450; /* Green checkmark */
+
+/* --- STATUS ICONS (Check/X for all cards) --- */
+.tvm-service-status {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    font-size: 1.2em;
+}
+
+/* Show checkmark and hide X when enabled */
+.is-enabled .dashicons-yes {
+    color: #46b450;
+    display: block;
+}
+.is-enabled .dashicons-no-alt {
+    display: none;
+}
+.tvm-region-card:not(.is-enabled) .dashicons-yes,
+.tvm-service-card:not(.is-enabled) .dashicons-yes {
+    display: none;
+}
+.tvm-region-card:not(.is-enabled) .dashicons-no-alt,
+.tvm-service-card:not(.is-enabled) .dashicons-no-alt {
+    color: #d54e21;
     display: block;
 }
 
-/* Hide the "X" when checked */
-.tvm-source-card.is-enabled .dashicons-no-alt {
-    display: none;
+
+/* --- COLLAPSIBLE STRUCTURE --- */
+
+.tvm-type-group {
+    margin-bottom: 20px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
 }
 
-/* Style the "X" when NOT checked */
-.tvm-source-card:not(.is-enabled) .dashicons-yes {
-    display: none;
+.tvm-region-header {
+    cursor: pointer;
+    padding: 10px 15px;
+    background: #f7f7f7;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
+.tvm-type-group:not(.is-open) .dashicons-arrow-up { display: none; }
+.tvm-type-group.is-open .dashicons-arrow-down { display: none; }
+.tvm-region-header:hover { background: #f0f0f0; }
 
-.tvm-source-card:not(.is-enabled) .dashicons-no-alt {
-    color: #d54e21; /* Red X */
-    display: block;
-}
+.tvm-region-header h3 { margin: 0; font-size: 1.2em; }
+.tvm-region-header .dashicons { transition: transform 0.3s ease-in-out; }
