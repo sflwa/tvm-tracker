@@ -5,7 +5,7 @@
  *
  * @package Tvm_Tracker
  * @subpackage Includes
- * @version 2.1.2
+ * @version 2.2.1
  */
 
 // Exit if accessed directly.
@@ -25,12 +25,13 @@ class Tvm_Tracker_DB {
     private $table_episode_links;
     private $table_sources;
     private $table_episodes; // Tracking table
+    private $table_api_cache; // NEW: API Cache table
     private $api_client;
 
 
-    /**
+   /**
      * Constructor.
-     * Sets up table names.
+     * Sets up table names and triggers migration check.
      */
     public function __construct() {
         global $wpdb;
@@ -39,6 +40,10 @@ class Tvm_Tracker_DB {
         $this->table_episode_links = $wpdb->prefix . 'tvm_tracker_episode_links';
         $this->table_sources       = $wpdb->prefix . 'tvm_tracker_sources';
         $this->table_episodes      = $wpdb->prefix . 'tvm_tracker_episodes';
+        $this->table_api_cache     = $wpdb->prefix . 'tvm_tracker_api_cache'; // NEW TABLE DEFINITION
+        
+        // One-time check to migrate old transients immediately upon class load
+        $this->tvm_tracker_migrate_transients();
     }
 
     /**
@@ -49,6 +54,293 @@ class Tvm_Tracker_DB {
     public function tvm_tracker_set_api_client( $api_client ) {
         $this->api_client = $api_client;
     }
+
+    // =======================================================================
+    // API CACHE METHODS (NEW)
+    // =======================================================================
+    
+    /**
+     * Retrieves cached API data from the custom table.
+     *
+     * @param string $cache_key The MD5 hash key.
+     * @return array|bool The cached data array (data, expires, type) or false if not found/expired.
+     */
+    public function tvm_tracker_get_api_cache( $cache_key ) {
+        global $wpdb;
+        $current_time = current_time( 'mysql' );
+        
+        $sql = $wpdb->prepare(
+            "SELECT cached_data FROM {$this->table_api_cache} WHERE cache_key = %s AND cache_expires > %s",
+            $cache_key,
+            $current_time
+        );
+        $result = $wpdb->get_var( $sql );
+        
+        if ( ! $result ) {
+            return false;
+        }
+        
+        // Unserialize and return the data
+        return unserialize( $result );
+    }
+    
+    /**
+     * Stores/Updates API data in the custom cache table.
+     *
+     * @param string $cache_key The MD5 hash key.
+     * @param string $request_path The human-readable API path.
+     * @param string $cache_type The API endpoint type.
+     * @param array $data The API response data array.
+     * @param int $duration The cache duration in seconds.
+     * @return bool True on success, False on failure.
+     */
+    public function tvm_tracker_set_api_cache( $cache_key, $request_path, $cache_type, $data, $duration ) {
+        global $wpdb;
+        
+        $current_time = current_time( 'mysql' );
+        $cache_expires = date( 'Y-m-d H:i:s', strtotime( $current_time ) + $duration );
+        $serialized_data = serialize( $data );
+        
+        $existing_id = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$this->table_api_cache} WHERE cache_key = %s", $cache_key ) );
+        
+        if ( $existing_id ) {
+            // Update existing entry
+            $result = $wpdb->update(
+                $this->table_api_cache,
+                array( 
+                    'last_updated' => $current_time,
+                    'cache_expires' => $cache_expires,
+                    'cached_data' => $serialized_data,
+                    // Note: request_path, cache_type, first_call remain unchanged on update
+                ),
+                array( 'id' => $existing_id ),
+                array( '%s', '%s', '%s' ),
+                array( '%d' )
+            );
+        } else {
+            // Insert new entry
+            $result = $wpdb->insert(
+                $this->table_api_cache,
+                array(
+                    'cache_key' => $cache_key,
+                    'request_path' => $request_path,
+                    'cache_type' => $cache_type,
+                    'first_call' => $current_time,
+                    'last_updated' => $current_time,
+                    'cache_expires' => $cache_expires,
+                    'cached_data' => $serialized_data,
+                ),
+                array( '%s', '%s', '%s', '%s', '%s', '%s', '%s' )
+            );
+        }
+        
+        return $result !== false;
+    }
+    
+    /**
+     * Deletes a specific cache entry.
+     *
+     * @param string $cache_key The MD5 hash key.
+     * @return bool True on success, False on failure.
+     */
+    public function tvm_tracker_delete_api_cache( $cache_key ) {
+        global $wpdb;
+        return $wpdb->delete( $this->table_api_cache, array( 'cache_key' => $cache_key ), array( '%s' ) ) !== false;
+    }
+    
+    /**
+     * One-time migration function to move old WordPress transients to the new DB table.
+     * Only runs once based on a stored option.
+     */
+    public function tvm_tracker_migrate_transients() {
+        global $wpdb;
+        
+        if ( get_option( 'tvm_tracker_cache_migrated' ) ) {
+            return;
+        }
+
+        // Find all transients related to our plugin in the wp_options table
+        $sql = "SELECT option_name, option_value FROM $wpdb->options WHERE option_name LIKE '\_transient\_tvm\_tracker\_%'";
+        $transients = $wpdb->get_results( $sql, ARRAY_A );
+        
+        if ( empty( $transients ) ) {
+            // No transients found, just mark as migrated and exit
+            update_option( 'tvm_tracker_cache_migrated', true );
+            return;
+        }
+        
+        // Default cache durations (in seconds)
+        $duration_map = [
+            'details'  => 2592000, // 1 month
+            'sources'  => 2592000, // 1 month
+            'episodes' => 604800,  // 1 week
+            'search'   => 43200,   // 12 hours (default in API class)
+            'default'  => 43200,   // 12 hours
+        ];
+
+        foreach ( $transients as $transient ) {
+            $option_name = $transient['option_name'];
+            
+            // Extract the original key suffix: _transient_tvm_tracker_MD5HASH
+            $cache_key = substr( $option_name, 21 ); 
+            $cached_data = unserialize( $transient['option_value'] );
+            
+            // --- Attempt to reverse engineer type and path (Best Effort) ---
+            $cache_type = 'migrated';
+            $request_path = 'Migrated Cache (Key: ' . $cache_key . ')';
+            
+            // Determine expiration time (if the transient expiration option exists)
+            $timeout_option_name = '_transient_timeout_' . substr($option_name, 11);
+            $timeout_timestamp = get_option( $timeout_option_name );
+            
+            if ( $timeout_timestamp ) {
+                // Set the expiry date based on the existing timeout
+                $cache_expires = date( 'Y-m-d H:i:s', $timeout_timestamp );
+            } else {
+                // Fallback: Set a default expiration of 12 hours from now
+                $cache_expires = date( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) + $duration_map['default'] );
+            }
+
+            // Insert into the new table
+            $wpdb->insert(
+                $this->table_api_cache,
+                array(
+                    'cache_key'     => $cache_key,
+                    'request_path'  => sanitize_text_field( $request_path ),
+                    'cache_type'    => $cache_type,
+                    'first_call'    => current_time( 'mysql' ), // Use now() as requested
+                    'last_updated'  => current_time( 'mysql' ), // Use now() as requested
+                    'cache_expires' => $cache_expires,
+                    'cached_data'   => serialize( $cached_data ),
+                ),
+                array( '%s', '%s', '%s', '%s', '%s', '%s', '%s' )
+            );
+            
+            // Clean up old transients (delete transient and its timeout option)
+            delete_option( $option_name );
+            delete_option( $timeout_option_name );
+        }
+        
+        // Mark migration as complete
+        update_option( 'tvm_tracker_cache_migrated', true );
+    }
+
+// =======================================================================
+    // ADMIN STATS GETTER METHODS (NEW)
+    // =======================================================================
+    
+    /**
+     * Gets the total count of unique tracked TV series across all users.
+     * @return int
+     */
+    public function tvm_tracker_get_total_shows_count() {
+        global $wpdb;
+        $sql = "SELECT COUNT(DISTINCT title_id) FROM {$this->table_shows} WHERE item_type NOT IN ('movie', 'short_film', 'doc_film', 'tv_movie')";
+        return absint( $wpdb->get_var( $sql ) );
+    }
+    
+    /**
+     * Gets the total count of unique tracked movies across all users.
+     * @return int
+     */
+    public function tvm_tracker_get_total_movies_count() {
+        global $wpdb;
+        $sql = "SELECT COUNT(DISTINCT title_id) FROM {$this->table_shows} WHERE item_type IN ('movie', 'short_film', 'doc_film', 'tv_movie')";
+        return absint( $wpdb->get_var( $sql ) );
+    }
+    
+    /**
+     * Gets the total count of episodes stored in the static data table.
+     * @return int
+     */
+    public function tvm_tracker_get_total_episodes_count() {
+        global $wpdb;
+        $sql = "SELECT COUNT(id) FROM {$this->table_episode_data}";
+        return absint( $wpdb->get_var( $sql ) );
+    }
+    
+    /**
+     * Gets the total count of entries in the API cache table.
+     * @return int
+     */
+    public function tvm_tracker_get_cache_count() {
+        global $wpdb;
+        $sql = "SELECT COUNT(id) FROM {$this->table_api_cache}";
+        return absint( $wpdb->get_var( $sql ) );
+    }
+
+
+/**
+     * Retrieves all log records from the API cache table for the Admin Log view.
+     *
+     * @param string $cache_type Optional cache type to filter by.
+     * @param int $title_id Optional title ID to filter by (based on request_path).
+     * @return array Array of cache log objects.
+     */
+    public function tvm_tracker_get_api_log_records( $cache_type = '', $title_id = 0 ) {
+        global $wpdb;
+        
+        $where_clauses = array();
+        
+        // Filter by Type
+        if ( ! empty( $cache_type ) && $cache_type !== 'all' ) {
+            $where_clauses[] = $wpdb->prepare( "cache_type = %s", sanitize_text_field( $cache_type ) );
+        }
+        
+        // Filter by Title ID (requires matching the request_path structure)
+        if ( $title_id > 0 ) {
+             // Look for title/ID/details/ or title/ID/episodes/ or title/ID/sources/
+             $title_id_part = (string)absint($title_id);
+             $where_clauses[] = $wpdb->prepare( "request_path LIKE %s", '%title/' . $wpdb->esc_like($title_id_part) . '/%' );
+        }
+        
+        $where_clause_sql = !empty($where_clauses) ? ' WHERE ' . implode(' AND ', $where_clauses) : '';
+
+        $sql = "
+            SELECT 
+                cache_key,
+                request_path,
+                cache_type,
+                first_call,
+                last_updated,
+                cache_expires
+            FROM {$this->table_api_cache} 
+            {$where_clause_sql}
+            ORDER BY last_updated DESC
+            LIMIT 200
+        ";
+        return $wpdb->get_results( $sql, ARRAY_A );
+    }
+
+/**
+     * Retrieves the title name from the shows table based on the title ID.
+     *
+     * @param int $title_id The Watchmode title ID.
+     * @return string The title name or empty string.
+     */
+    public function tvm_tracker_get_title_name_by_id( $title_id ) {
+        global $wpdb;
+        $sql = $wpdb->prepare(
+            "SELECT title_name FROM {$this->table_shows} WHERE title_id = %d LIMIT 1",
+            absint( $title_id )
+        );
+        return $wpdb->get_var( $sql );
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     // =======================================================================
     // CORE TRACKING METHODS (TVM_TRACKER_SHOWS TABLE)
@@ -146,7 +438,7 @@ class Tvm_Tracker_DB {
     public function tvm_tracker_get_tracked_shows( $user_id ) {
         global $wpdb;
         $sql = $wpdb->prepare(
-            "SELECT * FROM {$this->table_shows} WHERE user_id = %d AND item_type NOT IN ('movie', 'short_film', 'doc_film') ",
+            "SELECT * FROM {$this->table_shows} WHERE user_id = %d AND item_type NOT IN ('movie', 'short_film', 'doc_film', 'tv_movie') ",
             absint( $user_id )
         );
         return $wpdb->get_results( $sql );
@@ -161,7 +453,7 @@ class Tvm_Tracker_DB {
     public function tvm_tracker_get_tracked_movies( $user_id ) {
         global $wpdb;
         $sql = $wpdb->prepare(
-            "SELECT * FROM {$this->table_shows} WHERE user_id = %d AND item_type IN ('movie', 'short_film', 'doc_film') ",
+            "SELECT * FROM {$this->table_shows} WHERE user_id = %d AND item_type IN ('movie', 'short_film', 'doc_film', 'tv_movie') ",
             absint( $user_id )
         );
         return $wpdb->get_results( $sql );
@@ -213,7 +505,7 @@ class Tvm_Tracker_DB {
         $sql = "
             SELECT DISTINCT title_id
             FROM {$this->table_shows}
-            WHERE (end_year IS NULL OR end_year = '0000') AND item_type NOT IN ('movie', 'short_film', 'doc_film')
+            WHERE (end_year IS NULL OR end_year = '0000') AND item_type NOT IN ('movie', 'short_film', 'doc_film', 'tv_movie')
         ";
         $ongoing_title_ids = $wpdb->get_col( $sql );
         
@@ -256,31 +548,31 @@ class Tvm_Tracker_DB {
         global $wpdb;
         $title_id = absint( $title_id );
         
-        // 1. Check if data already exists and if this is NOT an update check
-        if ( ! $is_update ) {
-            $sql_check = $wpdb->prepare( "SELECT COUNT(id) FROM {$this->table_episode_data} WHERE title_id = %d", $title_id );
-            if ( absint( $wpdb->get_var( $sql_check ) ) > 0 ) {
-                // If data exists and we are not updating, return the existing end year if available
-                $end_year_sql = $wpdb->prepare("SELECT end_year FROM {$this->table_shows} WHERE title_id = %d LIMIT 1", $title_id);
-                return $wpdb->get_var($end_year_sql);
-            }
-        }
-
-        // --- 2. Fetch Title Details to get end_year and episodes ---
+        // --- 1. ALWAYS Fetch Title Details to get the most recent end_year status ---
         $details = $this->api_client->tvm_tracker_get_title_details( $title_id );
-        $episodes = $this->api_client->tvm_tracker_get_episodes( $title_id );
         
-        if ( is_wp_error( $episodes ) || empty( $episodes ) ) {
-            return null;
-        }
-
         $end_year = null;
         if ( ! is_wp_error( $details ) && ! empty( $details['end_year'] ) ) {
             // Store end year as a 4-digit string
             $end_year = absint( $details['end_year'] );
         }
         
-        // --- 3. Populate Episode Data Table & Links Table ---
+        // 2. Check if episode data already exists (only skip if NOT an update check)
+        $sql_check = $wpdb->prepare( "SELECT COUNT(id) FROM {$this->table_episode_data} WHERE title_id = %d", $title_id );
+        if ( ! $is_update && absint( $wpdb->get_var( $sql_check ) ) > 0 ) {
+            // Data exists, skip episode/link population, but return the fresh end_year fetched above.
+            return $end_year;
+        }
+
+        // --- 3. Proceed to fetch episodes and populate static data ---
+        $episodes = $this->api_client->tvm_tracker_get_episodes( $title_id );
+        
+        if ( is_wp_error( $episodes ) || empty( $episodes ) ) {
+            // Cannot populate episodes, but we still have the end_year from details.
+            return $end_year; 
+        }
+
+        // --- 4. Populate Episode Data Table & Links Table ---
         foreach ( $episodes as $episode ) {
             $episode_watchmode_id = absint( $episode['id'] );
 
@@ -322,7 +614,7 @@ class Tvm_Tracker_DB {
                 array( '%d', '%d', '%d', '%d', '%s', '%s', '%s', '%s' )
             );
 
-            // --- 4. Populate Episode Links Table ---
+            // --- 5. Populate Episode Links Table ---
             if ( isset( $episode['sources'] ) && is_array( $episode['sources'] ) ) {
                 foreach ( $episode['sources'] as $source ) {
                     $wpdb->insert(
@@ -375,6 +667,50 @@ class Tvm_Tracker_DB {
                 array( '%d', '%s', '%s' )
             );
         }
+    }
+
+
+    /**
+     * Forces an immediate check for end_year on all currently tracked series 
+     * that are incorrectly marked as ongoing (end_year is NULL or '0000').
+     * Designed as a one-time backfill for existing users.
+     * * @return int The number of shows processed.
+     */
+    public function tvm_tracker_force_update_ongoing_series() {
+        global $wpdb;
+        
+        // Get all unique series titles that are NOT marked as ended (end_year IS NULL or 0)
+        // and are not movies (including the 'tv_movie' fix).
+        $sql = "
+            SELECT DISTINCT title_id
+            FROM {$this->table_shows}
+            WHERE (end_year IS NULL OR end_year = '0000') AND item_type NOT IN ('movie', 'short_film', 'doc_film', 'tv_movie')
+        ";
+        $ongoing_title_ids = $wpdb->get_col( $sql );
+        $processed_count = 0;
+        
+        if ( empty( $ongoing_title_ids ) ) {
+            return $processed_count;
+        }
+
+        foreach ( $ongoing_title_ids as $title_id ) {
+            // Call the core populate logic (which was just fixed to always retrieve end_year)
+            $end_year = $this->tvm_tracker_populate_static_data( absint($title_id), true ); 
+            
+            // If the series has ended (end_year is not empty/null), update the tracking table.
+            if (!empty($end_year)) {
+                 $wpdb->update(
+                    $this->table_shows,
+                    array('end_year' => $end_year),
+                    array('title_id' => $title_id),
+                    array('%s'),
+                    array('%d')
+                );
+                $processed_count++;
+            }
+        }
+        
+        return $processed_count;
     }
 
 
@@ -610,3 +946,4 @@ class Tvm_Tracker_DB {
         return $result !== false;
     }
 }
+
