@@ -44,9 +44,75 @@ class Tvm_Tracker_Settings {
         
         add_action( 'admin_menu', array( $this, 'tvm_tracker_add_admin_menu' ) );
         add_action( 'admin_init', array( $this, 'tvm_tracker_settings_init' ) );
+        add_action( 'admin_init', array( $this, 'tvm_tracker_handle_manual_sync' ) );
+        add_action( 'admin_init', array( $this, 'tvm_tracker_handle_bulk_sync' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'tvm_tracker_admin_enqueue_styles' ) );
         add_action( 'admin_notices', array( $this, 'tvm_tracker_display_backfill_notice' ) );
     }
+
+/**
+     * Handles a single title database sync request from the API Log page.
+     */
+    public function tvm_tracker_handle_manual_sync() {
+        if ( ! isset( $_GET['tvm_action'] ) || $_GET['tvm_action'] !== 'sync_from_cache' ) {
+            return;
+        }
+
+        check_admin_referer( 'tvm_sync_cache_nonce' );
+
+        $title_id = absint( $_GET['title_id'] ?? 0 );
+        if ( $title_id > 0 ) {
+            $this->db_client->tvm_tracker_sync_db_from_cache( $title_id );
+            
+            $redirect_url = add_query_arg( 
+                array( 
+                    'settings-updated' => 'true', 
+                    'tvm_message' => urlencode(__('Database synced from cache.', 'tvm-tracker')) 
+                ), 
+                admin_url( 'admin.php?page=tvm-tracker-api-log' ) 
+            );
+            wp_safe_redirect( $redirect_url );
+            exit;
+        }
+    }
+
+    /**
+     * NEW: Handles bulk sync for ALL tracked titles in the system.
+     */
+    public function tvm_tracker_handle_bulk_sync() {
+        if ( ! isset( $_GET['tvm_action'] ) || $_GET['tvm_action'] !== 'bulk_sync_all' ) {
+            return;
+        }
+
+        check_admin_referer( 'tvm_bulk_sync_nonce' );
+
+        global $wpdb;
+        $table_shows = $wpdb->prefix . 'tvm_tracker_shows';
+        
+        $unique_titles = $wpdb->get_col( "SELECT DISTINCT title_id FROM $table_shows" );
+
+        if ( ! empty( $unique_titles ) ) {
+            foreach ( $unique_titles as $title_id ) {
+                $this->db_client->tvm_tracker_sync_db_from_cache( absint($title_id) );
+            }
+            $msg = sprintf( __('Bulk sync complete. Processed %d titles.', 'tvm-tracker'), count($unique_titles) );
+        } else {
+            $msg = __('No tracked titles found to sync.', 'tvm-tracker');
+        }
+
+        $redirect_url = add_query_arg( 
+            array( 'settings-updated' => 'true', 'tvm_message' => urlencode($msg) ), 
+            admin_url( 'admin.php?page=tvm-tracker-api-log' ) 
+        );
+        wp_safe_redirect( $redirect_url );
+        exit;
+    }
+
+
+
+
+
+
 
     /**
      * Adds the top-level admin menu item and submenus.
@@ -664,7 +730,7 @@ class Tvm_Tracker_Settings {
 
         $formatted_monthly_estimate = number_format(round($monthly_calls_total_estimate));
         $total_calls_all_time = $this->db_client->tvm_tracker_get_cache_count() ?? 0;
-
+        $bulk_sync_url = wp_nonce_url( add_query_arg('tvm_action', 'bulk_sync_all', $plugin_page_url), 'tvm_bulk_sync_nonce' );
 
         // --- RENDER UI ---
         ?>
@@ -681,7 +747,7 @@ class Tvm_Tracker_Settings {
                     absint($total_calls_all_time)
                 ); ?>
             </div>
-
+            <div style="padding-bottom:25px;"><a href="<?php echo esc_url($bulk_sync_url); ?>" class="button button-primary"><?php esc_html_e('Sync All Records from Cache', 'tvm-tracker'); ?></a></div>
 
             <div class="alignleft actions">
                 <form method="get" style="display: flex; gap: 10px; align-items: center;">
