@@ -747,7 +747,13 @@ class Tvm_Tracker_Settings {
                     absint($total_calls_all_time)
                 ); ?>
             </div>
-            <div style="padding-bottom:25px;"><a href="<?php echo esc_url($bulk_sync_url); ?>" class="button button-primary"><?php esc_html_e('Sync All Records from Cache', 'tvm-tracker'); ?></a></div>
+            <div class="tvm-api-log-actions" style="margin-bottom: 20px; background: #fff; padding: 15px; border: 1px solid #ccd0d4; display: flex; justify-content: space-between; align-items: center;">
+    <div style="flex-grow: 1;">
+        <strong><?php esc_html_e('Database Synchronization:', 'tvm-tracker'); ?></strong> 
+        <?php esc_html_e('Force relational tables to update using current cached JSON data.', 'tvm-tracker'); ?>
+    </div>
+    <a href="<?php echo esc_url($bulk_sync_url); ?>" class="button button-primary"><?php esc_html_e('Sync All Records from Cache', 'tvm-tracker'); ?></a>
+</div>
 
             <div class="alignleft actions">
                 <form method="get" style="display: flex; gap: 10px; align-items: center;">
