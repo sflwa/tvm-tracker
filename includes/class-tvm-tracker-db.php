@@ -5,7 +5,7 @@
  *
  * @package Tvm_Tracker
  * @subpackage Includes
- * @version 2.2.1
+ * @version 2.2.2
  */
 
 // Exit if accessed directly.
@@ -40,7 +40,7 @@ class Tvm_Tracker_DB {
         $this->table_episode_links = $wpdb->prefix . 'tvm_tracker_episode_links';
         $this->table_sources       = $wpdb->prefix . 'tvm_tracker_sources';
         $this->table_episodes      = $wpdb->prefix . 'tvm_tracker_episodes';
-        $this->table_api_cache     = $wpdb->prefix . 'tvm_tracker_api_cache'; // NEW TABLE DEFINITION
+        $this->table_api_cache     = $wpdb->prefix . 'tvm_tracker_api_cache';
         
         // One-time check to migrate old transients immediately upon class load
         $this->tvm_tracker_migrate_transients();
@@ -158,28 +158,33 @@ class Tvm_Tracker_DB {
             return;
         }
 
+        // Find all transients related to our plugin in the wp_options table
         $sql = "SELECT option_name, option_value FROM $wpdb->options WHERE option_name LIKE '\_transient\_tvm\_tracker\_%'";
         $transients = $wpdb->get_results( $sql, ARRAY_A );
         
         if ( empty( $transients ) ) {
+            // No transients found, just mark as migrated and exit
             update_option( 'tvm_tracker_cache_migrated', true );
             return;
         }
         
+        // Default cache durations (in seconds)
         $duration_map = [
-            'details'  => 2592000,
-            'sources'  => 2592000,
-            'episodes' => 604800,
-            'search'   => 43200,
-            'default'  => 43200,
+            'details'  => 2592000, // 1 month
+            'sources'  => 2592000, // 1 month
+            'episodes' => 604800,  // 1 week
+            'search'   => 43200,   // 12 hours
+            'default'  => 43200,   // 12 hours
         ];
 
         foreach ( $transients as $transient ) {
             $option_name = $transient['option_name'];
             $cache_key = substr( $option_name, 21 ); 
             $cached_data = unserialize( $transient['option_value'] );
+            
             $cache_type = 'migrated';
             $request_path = 'Migrated Cache (Key: ' . $cache_key . ')';
+            
             $timeout_option_name = '_transient_timeout_' . substr($option_name, 11);
             $timeout_timestamp = get_option( $timeout_option_name );
             
@@ -189,6 +194,7 @@ class Tvm_Tracker_DB {
                 $cache_expires = date( 'Y-m-d H:i:s', strtotime( current_time( 'mysql' ) ) + $duration_map['default'] );
             }
 
+            // Insert into the new table
             $wpdb->insert(
                 $this->table_api_cache,
                 array(
@@ -203,15 +209,17 @@ class Tvm_Tracker_DB {
                 array( '%s', '%s', '%s', '%s', '%s', '%s', '%s' )
             );
             
+            // Clean up old transients
             delete_option( $option_name );
             delete_option( $timeout_option_name );
         }
         
+        // Mark migration as complete
         update_option( 'tvm_tracker_cache_migrated', true );
     }
 
     // =======================================================================
-    // ADMIN STATS GETTER METHODS (NEW)
+    // ADMIN STATS GETTER METHODS
     // =======================================================================
     
     public function tvm_tracker_get_total_shows_count() {
@@ -379,7 +387,7 @@ class Tvm_Tracker_DB {
         }
 
         foreach ( $ongoing_title_ids as $title_id ) {
-            $end_year = $this->tvm_tracker_populate_static_data( absint($title_id), true ); 
+            $end_year = $this->tvm_tracker_populate_static_data( absint($title_id), true );
             if (!empty($end_year)) {
                  $wpdb->update(
                     $this->table_shows,
@@ -410,11 +418,11 @@ class Tvm_Tracker_DB {
         }
         
         // 2. Fetch episodes and populate static data
-        // We no longer return early if data exists to ensure the DB syncs with the API cache
+        // Overwrites stale records by removing early return and using replace()
         $episodes = $this->api_client->tvm_tracker_get_episodes( $title_id );
         
         if ( is_wp_error( $episodes ) || empty( $episodes ) ) {
-            return $end_year; 
+            return $end_year;
         }
 
         foreach ( $episodes as $episode ) {
@@ -467,6 +475,19 @@ class Tvm_Tracker_DB {
         return $end_year;
     }
     
+    /**
+     * Forces relational database tables to update using current cache data.
+     */
+    public function tvm_tracker_sync_db_from_cache( $title_id ) {
+        $title_id = absint( $title_id );
+        if ( ! $title_id ) return false;
+
+        // Populate static data with update flag to force synchronization
+        $this->tvm_tracker_populate_static_data( $title_id, true );
+
+        return true;
+    }
+
     public function tvm_tracker_populate_global_sources() {
         global $wpdb;
         $sql_check = "SELECT COUNT(id) FROM {$this->table_sources}";
@@ -503,7 +524,7 @@ class Tvm_Tracker_DB {
             return $processed_count;
         }
         foreach ( $ongoing_title_ids as $title_id ) {
-            $end_year = $this->tvm_tracker_populate_static_data( absint($title_id), true ); 
+            $end_year = $this->tvm_tracker_populate_static_data( absint($title_id), true );
             if (!empty($end_year)) {
                  $wpdb->update(
                     $this->table_shows,
