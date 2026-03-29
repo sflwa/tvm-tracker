@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - Core Orchestrator
- * Version 2.0.0 - Fix Stream Toggle Media Reset
+ * Version 2.0.3 - Global Settings Bootstrapping
  */
 jQuery(function($) {
     window.TVM_Core = {
@@ -10,7 +10,17 @@ jQuery(function($) {
             } else { $('#tvm-results-count').text(`${count} shown`); }
         },
         showLoading: function() { $('#tvm-watchlist-grid').css('opacity', '0.5'); },
-        hideLoading: function() { $('#tvm-watchlist-grid').css('opacity', '1'); }
+        hideLoading: function() { $('#tvm-watchlist-grid').css('opacity', '1'); },
+        
+        // NEW: Bootstrap settings for all modules
+        initSettings: function() {
+            $.post(tvm_app.ajax_url, { action: 'tvm_get_settings', nonce: tvm_app.nonce }, function(res) {
+                if (res.success && res.data.raw) {
+                    window.tvm_settings_data = res.data.raw;
+                    $(document).trigger('tvm_settings_ready');
+                }
+            });
+        }
     };
 
     // Routing Logic
@@ -32,12 +42,10 @@ jQuery(function($) {
         const mediaType = $(this).data('type');
         window.current_media_type = mediaType;
         
-        // UI Logic: Only show Calendar button for TV
         if (mediaType === 'tv') {
             $('.tvm-calendar-toggle').show();
         } else {
             $('.tvm-calendar-toggle').hide();
-            // If we were on calendar view and switched to movies, reset filter to 'all'
             if ($('.tvm-filter-btn.active').data('filter') === 'calendar') {
                 $('.tvm-filter-btn').removeClass('active');
                 $('.tvm-filter-btn[data-filter="all"]').addClass('active');
@@ -53,14 +61,11 @@ jQuery(function($) {
         const filter = $(this).data('filter');
         $('.tvm-filter-btn').removeClass('active'); 
         $(this).addClass('active');
-        
-        // Pass the filter name as a secondary argument for modules to pick up
         $(document).trigger('tvm_filter_change', [filter]);
     });
 
     $(document).on('input', '#tvm-vault-search-input', () => $(document).trigger('tvm_filter_change'));
     
-    // FIX: Maintain current media type context when toggling stream-only filter
     $(document).on('change', '#tvm-stream-only-toggle', function() {
         const currentFilter = $('.tvm-filter-btn.active').data('filter') || 'all';
         $(document).trigger('tvm_filter_change', [currentFilter]);
@@ -71,18 +76,21 @@ jQuery(function($) {
     $(document).on('click', '#tvm-details-modal', function(e) { if (e.target === this) closeModal(); });
     $(document).on('keydown', e => { if (e.key === "Escape") closeModal(); });
 
-    // STARTUP ROUTE - Preserve current media type if already set
+    // STARTUP ROUTE
     if (!window.current_media_type) {
         window.current_media_type = 'tv';
     }
     
     $(window).on('load', function() {
+        TVM_Core.initSettings(); // Bootstrap settings on load
         setTimeout(() => {
-            // Default visibility for startup
             if (window.current_media_type === 'tv') {
                 $('.tvm-calendar-toggle').show();
+                $('.tvm-type-tab[data-type="tv"]').addClass('active');
             } else {
                 $('.tvm-calendar-toggle').hide();
+                $('.tvm-type-tab[data-type="movie"]').addClass('active');
+                $('.tvm-type-tab[data-type="tv"]').removeClass('active');
             }
             $(document).trigger('tvm_tab_switch', ['watchlist']);
         }, 200);
