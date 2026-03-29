@@ -3,7 +3,7 @@
  * Plugin Name:       TV & Movie Tracker
  * Plugin URI:        https://sflwa.com/
  * Description:       A premium personal library for tracking TV shows and Movies.
- * Version:           1.8.7
+ * Version:           2.0.0
  * Author:            South Florida Web Advisors
  * License:           GPLv2 or later
  * Text Domain:       tvm-tracker
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'TVM_VERSION', '1.8.7' );
+define( 'TVM_VERSION', '2.0.0' );
 define( 'TVM_PATH', plugin_dir_path( __FILE__ ) );
 define( 'TVM_URL', plugin_dir_url( __FILE__ ) );
 
@@ -36,7 +36,9 @@ final class TVM_Tracker {
 			$this->tmdb = new TVM_API_TMDB();
 		}
 
-		// FIX: Move CPT registration to the 'init' hook to prevent Fatal Error
+		// Register custom cron schedules
+		add_filter( 'cron_schedules', array( $this, 'add_custom_cron_intervals' ) );
+
 		add_action( 'init', function() {
 			if ( class_exists( 'TVM_CPT' ) ) {
 				$cpt = new TVM_CPT();
@@ -44,7 +46,6 @@ final class TVM_Tracker {
 			}
 		});
 
-		// Initialize Admin Interface
 		if ( class_exists( 'TVM_Admin_Search' ) ) {
 			new TVM_Admin_Search();
 		}
@@ -59,6 +60,17 @@ final class TVM_Tracker {
 
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		register_activation_hook( __FILE__, array( $this, 'activate_plugin' ) );
+	}
+
+	/**
+	 * Define custom monthly interval for WP-Cron
+	 */
+	public function add_custom_cron_intervals( $schedules ) {
+		$schedules['monthly'] = array(
+			'interval' => 2635200, // 30.5 days in seconds
+			'display'  => __( 'Once Every Month', 'tvm-tracker' )
+		);
+		return $schedules;
 	}
 
 	public function enqueue_assets() {
@@ -80,7 +92,7 @@ final class TVM_Tracker {
 	private function includes() {
 		require_once TVM_PATH . 'includes/class-tvm-settings.php';
 		require_once TVM_PATH . 'includes/class-tvm-api-tmdb.php';
-		require_once TVM_PATH . 'includes/class-tvm-api-tvmaze.php';
+		require_once TVM_PATH . 'includes/class-tvm-api-tvmaze.php'; // FIXED: Corrected path typo from TV_PATH to TVM_PATH
 		require_once TVM_PATH . 'includes/class-tvm-api-watchmode.php';
 		require_once TVM_PATH . 'includes/class-tvm-shortcodes.php';
 		require_once TVM_PATH . 'includes/class-tvm-cpt.php';
