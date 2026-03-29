@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - Main Styles
- * Version 1.4.1 - Full Integration (Calendar + Settings + Grid)
+ * Version 1.4.2 - Adaptive Calendar UI
  */
 
 #tvm-app-container {
@@ -307,8 +307,8 @@
 }
 
 .tvm-calendar-day {
-    aspect-ratio: 1 / 1;
-    padding: 5px;
+    min-height: 120px;
+    padding: 8px;
     border-right: 1px solid #eee;
     border-bottom: 1px solid #eee;
     position: relative;
@@ -321,17 +321,37 @@
 .tvm-calendar-day.today { background: #fff8e5; }
 
 .tvm-calendar-date {
-    font-size: 12px;
-    font-weight: 600;
-    color: #666;
+    font-size: 11px;
+    font-weight: 700;
+    color: #999;
+    display: block;
+    margin-bottom: 8px;
 }
 
-.tvm-calendar-dots {
+/* Desktop List in Day Box */
+.tvm-cal-ep-item {
+    font-size: 10px;
+    margin-bottom: 4px;
+    line-height: 1.3;
     display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-    margin-top: 5px;
-    justify-content: center;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+/* Mobile Dots View (Default Hidden on Desktop) */
+.tvm-calendar-dots { display: none; }
+
+@media (max-width: 800px) {
+    .tvm-calendar-day { min-height: 50px; aspect-ratio: 1/1; text-align: center; }
+    .tvm-cal-ep-item { display: none; }
+    .tvm-calendar-dots { 
+        display: flex; 
+        flex-wrap: wrap; 
+        gap: 3px; 
+        margin-top: 5px; 
+        justify-content: center; 
+    }
 }
 
 .tvm-calendar-dot {
@@ -340,7 +360,6 @@
     border-radius: 50%;
     background: #2271b1;
 }
-
 .tvm-calendar-dot.watched { background: #46b450; }
 
 /* --- UNWATCHED UI --- */
