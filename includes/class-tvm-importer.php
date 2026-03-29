@@ -1,7 +1,7 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.0.0 - WP-Cron Automation & Logic Lock
+ * Version 2.0.1 - Visibility Fix
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -31,17 +31,14 @@ class TVM_Importer {
 	 * 2) Watchmode sources for series with unwatched eps AND no sources
 	 */
 	public function run_weekly_sync() {
-		global $wpdb;
 		$shows = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1, 'meta_key' => '_tvm_media_type', 'meta_value' => 'tv' ) );
 		
 		foreach ( $shows as $show ) {
 			$tvdb_id = get_post_meta( $show->ID, '_tvm_tvdb_id', true );
 			$imdb_id = get_post_meta( $show->ID, '_tvm_imdb_id', true );
 			
-			// 1. Always Sync TVMaze Metadata (No Limit)
 			$this->sync_tvmaze_metadata( $show->ID, $tvdb_id );
 
-			// 2. Conditional Watchmode Sync (Only if Unwatched & Missing Sources)
 			if ( $this->needs_sources_sync( $show->ID ) ) {
 				$this->sync_watchmode_data( $show->ID, $imdb_id );
 			}
@@ -67,10 +64,7 @@ class TVM_Importer {
 		}
 	}
 
-	/**
-	 * Logic Helper: Check if item is unwatched
-	 */
-	private function is_item_fully_watched( $post_id, $type ) {
+	public function is_item_fully_watched( $post_id, $type ) {
 		global $wpdb;
 		$table = $wpdb->prefix . 'tvm_user_progress';
 		if ( 'movie' === $type ) {
@@ -88,9 +82,6 @@ class TVM_Importer {
 		}
 	}
 
-	/**
-	 * Logic Helper: TV Needs sources if unwatched and no sources exist in metadata
-	 */
 	private function needs_sources_sync( $post_id ) {
 		global $wpdb;
 		$has_sources = $wpdb->get_var( $wpdb->prepare(
@@ -114,7 +105,7 @@ class TVM_Importer {
 		wp_send_json_success( "Manual Sync Complete." );
 	}
 
-	private function sync_tvmaze_metadata( $post_id, $tvdb_id ) {
+	public function sync_tvmaze_metadata( $post_id, $tvdb_id ) {
 		$tvmaze = new TVM_API_TVMAZE();
 		$lookup = $tvmaze->get_id_by_external( $tvdb_id );
 		if ( ! is_wp_error( $lookup ) && isset( $lookup['id'] ) ) {
@@ -125,7 +116,7 @@ class TVM_Importer {
 		}
 	}
 
-	private function sync_watchmode_data( $post_id, $imdb_id ) {
+	public function sync_watchmode_data( $post_id, $imdb_id ) {
 		if ( ! $imdb_id ) return;
 		$type = get_post_meta( $post_id, '_tvm_media_type', true );
 		$watchmode = new TVM_API_WATCHMODE();
