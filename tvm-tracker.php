@@ -77,8 +77,8 @@ final class TVM_Tracker {
 
 
         require_once TVM_PATH . 'includes/class-tvm-cpt.php';
-		require_once TVM_PATH . 'includes/class-admin-search.php';
-		require_once TVM_PATH . 'includes/class-admin-metaboxes.php';
+		require_once TVM_PATH . 'includes/class-tvm-admin-search.php';
+		require_once TVM_PATH . 'includes/class-tvm-admin-metaboxes.php';
 		
 
 
