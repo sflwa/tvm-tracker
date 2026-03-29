@@ -1,10 +1,7 @@
 <?php
 /**
  * AJAX TV Watchlist Handler
- * Version 1.0.3 - Stream Only Filter Logic
- *
- * @package TV_Movie_Tracker
- * @version 1.0.3
+ * Version 1.0.4 - Aired Unwatched Logic Fix
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -44,8 +41,6 @@ class TVM_TV_Handler {
 
 		$watchlist = array();
 		$today_str = current_time( 'Y-m-d' );
-		
-		// Get user streaming preferences for Rule Check
 		$user_services  = get_user_meta( $user_id, 'tvm_user_services', true ) ?: array();
 		$primary_region = strtoupper( get_user_meta( $user_id, 'tvm_primary_region', true ) ?: 'US' );
 
@@ -54,7 +49,6 @@ class TVM_TV_Handler {
 				$query->the_post();
 				$id = get_the_ID();
 
-				// Get all episodes and their metadata
 				$ep_data = $wpdb->get_results( $wpdb->prepare( 
 					"SELECT p.ID, m1.meta_value as air_date, m2.meta_value as sources 
 					 FROM {$wpdb->posts} p
@@ -65,51 +59,36 @@ class TVM_TV_Handler {
 					$id 
 				) );
 
-				$ep_ids = wp_list_pluck( $ep_data, 'ID' );
-				$ep_count = count( $ep_ids );
+				$ep_count = count( $ep_data );
 				$ep_watched_count = 0;
+				$aired_unwatched_count = 0;
 				$has_upcoming = false;
-				$has_aired_unwatched = false;
 				$has_streaming = false;
 
 				if ( $ep_count > 0 ) {
-					// Count watched episodes
-					$ep_watched_count = (int) $wpdb->get_var( $wpdb->prepare(
-						"SELECT COUNT(*) FROM $progress_table 
-						 WHERE user_id = %d AND item_id = %d 
-						 AND episode_id IN (" . implode( ',', array_map( 'intval', $ep_ids ) ) . ") 
-						 AND watched_at IS NOT NULL",
-						$user_id, $id
-					) );
-
 					foreach ( $ep_data as $ep ) {
 						$is_future = ( $ep->air_date && $ep->air_date > $today_str );
-						
-						// Watch status check
 						$is_watched = $wpdb->get_var( $wpdb->prepare(
 							"SELECT id FROM $progress_table WHERE user_id = %d AND episode_id = %d AND watched_at IS NOT NULL",
 							$user_id, $ep->ID
 						) );
 
-						if ( $is_future ) {
-							$has_upcoming = true;
-						} elseif ( ! $is_watched ) {
-							$has_aired_unwatched = true;
+						if ( $is_watched ) {
+							$ep_watched_count++;
+						} elseif ( ! $is_future ) {
+							// FIX: Only count episodes that have already aired
+							$aired_unwatched_count++;
 						}
 
-						// Rule-based Streaming Check (Only if not already found)
+						if ( $is_future ) $has_upcoming = true;
+
 						if ( ! $has_streaming && ! empty( $ep->sources ) ) {
 							$sources = maybe_unserialize( $ep->sources );
 							if ( is_array( $sources ) ) {
 								foreach ( $sources as $s ) {
-									$sid   = (int) $s['source_id'];
-									$type  = $s['type'];
-									$reg   = strtoupper( $s['region'] );
-
-									if ( in_array( $type, array( 'rent', 'buy', 'purchase' ) ) ) continue;
-									if ( ! in_array( $sid, $user_services ) ) continue;
-
-									if ( ( $type === 'sub' && $reg === $primary_region ) || $type === 'free' ) {
+									if ( in_array( $s['type'], array( 'rent', 'buy', 'purchase' ) ) ) continue;
+									if ( ! in_array( (int)$s['source_id'], $user_services ) ) continue;
+									if ( ( $s['type'] === 'sub' && strtoupper($s['region']) === $primary_region ) || $s['type'] === 'free' ) {
 										$has_streaming = true;
 										break;
 									}
@@ -120,23 +99,21 @@ class TVM_TV_Handler {
 				}
 
 				$last_sync = get_post_meta( $id, '_tvm_last_sync', true );
-				$formatted_sync = $last_sync ? date( 'M j, g:i a', strtotime( $last_sync ) ) : 'Never';
-
 				$watchlist[] = array(
-					'id'                  => $id,
-					'title'               => get_the_title(),
-					'poster_path'         => get_post_meta( $id, '_tvm_poster_path', true ),
-					'ep_count'            => $ep_count,
-					'ep_watched'          => $ep_watched_count,
-					'has_aired_unwatched' => $has_aired_unwatched,
-					'has_upcoming'        => $has_upcoming,
-					'has_streaming'       => $has_streaming, // FOR THE STREAM ONLY TOGGLE
-					'last_sync'           => $formatted_sync
+					'id'                    => $id,
+					'title'                 => get_the_title(),
+					'poster_path'           => get_post_meta( $id, '_tvm_poster_path', true ),
+					'ep_count'              => $ep_count,
+					'ep_watched'            => $ep_watched_count,
+					'aired_unwatched_count' => $aired_unwatched_count,
+					'has_aired_unwatched'   => ( $aired_unwatched_count > 0 ),
+					'has_upcoming'          => $has_upcoming,
+					'has_streaming'         => $has_streaming,
+					'last_sync'             => $last_sync ? date( 'M j, g:i a', strtotime( $last_sync ) ) : 'Never'
 				);
 			}
 			wp_reset_postdata();
 		}
-
 		wp_send_json_success( array( 'items' => $watchlist ) );
 	}
 }
