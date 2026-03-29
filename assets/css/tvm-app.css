@@ -1,6 +1,6 @@
 /**
  * Plugin: TV & Movie Tracker
- * Version: 1.2.3
+ * Version: 1.2.4
  * Author: South Florida Web Advisors
  */
 
@@ -69,27 +69,26 @@
     gap: 20px;
 }
 
-/* New 12-column grid for Unwatched view */
-.tvm-grid-12 {
+/* Isolated 12-column grid for Unwatched Northern Star view */
+.tvm-grid-unwatched {
     display: grid;
     grid-template-columns: repeat(12, 1fr);
     gap: 10px;
     margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #eee;
 }
 
 @media (max-width: 1000px) { 
     .tvm-locked-grid { grid-template-columns: repeat(4, 1fr); } 
-    .tvm-grid-12 { grid-template-columns: repeat(6, 1fr); }
+    .tvm-grid-unwatched { grid-template-columns: repeat(6, 1fr); }
 }
 @media (max-width: 700px) { 
     .tvm-locked-grid { grid-template-columns: repeat(2, 1fr); } 
-    .tvm-grid-12 { grid-template-columns: repeat(4, 1fr); }
+    .tvm-grid-unwatched { grid-template-columns: repeat(4, 1fr); }
 }
 
 .tvm-movie-card {
     position: relative;
+    min-width: 0; /* Prevents flex/grid blowouts */
 }
 
 .tvm-poster-wrapper {
@@ -98,6 +97,7 @@
     border-radius: 8px;
     background: #000;
     aspect-ratio: 2 / 3;
+    transition: transform 0.2s ease;
 }
 
 .tvm-poster-wrapper img {
@@ -160,9 +160,7 @@
     color: #666;
 }
 
-/* Active Unwatched Selection */
 .tvm-unwatched-active {
-    border: 3px solid #2271b1 !important;
-    border-radius: 10px;
-    transform: scale(1.05);
+    outline: 3px solid #2271b1;
+    outline-offset: -3px;
 }
