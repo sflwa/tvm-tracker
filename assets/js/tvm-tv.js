@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.2.3 - Added Last Sync Display
+ * Version: 1.2.4 - Refined Filters & Logic
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -37,12 +37,7 @@ jQuery(function($) {
                 $btn.prop('disabled', true).text('Syncing...');
                 $.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: id, nonce: tvm_app.nonce }, (res) => {
                     $btn.prop('disabled', false).text('Sync Episodes');
-                    if (res.success) { 
-                        alert(res.data);
-                        // Refresh the entire watchlist cache to update the sync timestamp
-                        this.load(); 
-                        this.loadEpisodes(id); 
-                    }
+                    if (res.success) { alert(res.data); this.load(); this.loadEpisodes(id); }
                 });
             });
 
@@ -82,9 +77,16 @@ jQuery(function($) {
             const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
             const search = $('#tvm-vault-search-input').val().toLowerCase();
             let items = [...(window.tvm_tv_cache || [])];
-            if (filter === 'watched') items = items.filter(i => i.is_watched);
-            else if (filter === 'released') items = items.filter(i => i.ep_watched < i.ep_count);
-            else if (filter === 'upcoming') items = items.filter(i => i.has_upcoming);
+            
+            // Apply Logic for Watched, Unwatched, Upcoming
+            if (filter === 'watched') {
+                items = items.filter(i => i.ep_watched > 0);
+            } else if (filter === 'released') { // Acts as "Unwatched"
+                items = items.filter(i => i.has_aired_unwatched === true);
+            } else if (filter === 'upcoming') {
+                items = items.filter(i => i.has_upcoming === true);
+            }
+
             if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
             items.sort((a, b) => a.title.localeCompare(b.title));
             TVM_Core.updateCounter(items.length);
@@ -112,8 +114,6 @@ jQuery(function($) {
             const item = window.tvm_tv_cache.find(i => i.id == id);
             $('#tvm-watchlist-grid, .tvm-filters-container').hide();
             $('#tvm-tv-detail-view').show();
-            
-            // Added Last Sync display next to title
             $('#tvm-series-content').html(`
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                     <div style="display:flex; align-items:baseline; gap:12px;">
