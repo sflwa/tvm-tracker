@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.2.0 - Future Episode Safety
+ * Version: 1.2.1 - Future Safe & 48px Icons
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -126,7 +126,7 @@ jQuery(function($) {
                     res.data.forEach(ep => {
                         const statusColor = ep.is_watched ? '#46b450' : '#ddd';
                         
-                        // Step F Implementation: Logic for Future Episodes
+                        // Rule: Hide actions for future episodes
                         const sourceContent = ep.is_future 
                             ? '<span style="font-size:10px; color:#2271b1; text-transform:uppercase; background:#e7f3ff; padding:4px 8px; border-radius:4px; font-weight:700;">Upcoming</span>'
                             : this.renderSources(ep.sources);
@@ -174,15 +174,11 @@ jQuery(function($) {
             sources.forEach(s => {
                 const sid = parseInt(s.source_id);
                 if (['rent', 'buy', 'purchase'].includes(s.type)) return;
-                
                 if (userServices.includes(sid)) {
-                    const isPaidMatch = (s.type === 'sub' && s.region.toUpperCase() === primaryRegion);
-                    const isFreeMatch = (s.type === 'free');
-
-                    if (isPaidMatch || isFreeMatch) {
+                    if (s.type === 'free' || (s.type === 'sub' && s.region.toUpperCase() === primaryRegion)) {
                         const master = masterList.find(m => m.id == sid);
                         if (master && master.logo_100px) {
-                            html += `<img src="${master.logo_100px}" title="${s.name}" style="width:28px; height:28px; border-radius:4px; border:1px solid #eee; object-fit:contain;">`;
+                            html += `<img src="${master.logo_100px}" title="${s.name}" style="width:48px; height:48px; border-radius:6px; border:1px solid #eee; object-fit:contain;">`;
                             validCount++;
                         }
                     }
