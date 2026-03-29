@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - Main Styles
- * Version 1.4.2 - Adaptive Calendar UI
+ * Version 1.4.4 - Comprehensive Integration & Mobile Fixes
  */
 
 #tvm-app-container {
@@ -44,6 +44,12 @@
 }
 
 /* --- FILTERS & CONTROLS --- */
+.tvm-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap; /* Fix: Allow filter buttons to wrap on mobile */
+}
+
 .tvm-filter-btn {
     padding: 8px 18px;
     border-radius: 8px;
@@ -53,6 +59,16 @@
     cursor: pointer;
     font-size: 13px;
     font-weight: 600 !important;
+    white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+    .tvm-filter-btn {
+        padding: 6px 12px;
+        font-size: 12px;
+        flex: 1 1 auto; /* Fix: Buttons fill width on small screens */
+        text-align: center;
+    }
 }
 
 .tvm-filter-btn.active {
@@ -328,7 +344,6 @@
     margin-bottom: 8px;
 }
 
-/* Desktop List in Day Box */
 .tvm-cal-ep-item {
     font-size: 10px;
     margin-bottom: 4px;
@@ -339,7 +354,6 @@
     gap: 4px;
 }
 
-/* Mobile Dots View (Default Hidden on Desktop) */
 .tvm-calendar-dots { display: none; }
 
 @media (max-width: 800px) {
@@ -371,4 +385,13 @@
 #tvm-unwatched-inline-container {
     width: 100%;
     clear: both;
+}
+
+.tvm-mark-season-watched {
+    color: #fff !important;
+}
+
+.tvm-mark-season-watched:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
 }
