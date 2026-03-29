@@ -3,7 +3,7 @@
  * Version 2.0.0 - Fix Stream Toggle Media Reset
  */
 jQuery(function($) {
-    window.TV_Core = {
+    window.TVM_Core = {
         updateCounter: function(count) {
             if (!$('#tvm-results-count').length) {
                 $('.tvm-vault-controls').prepend(`<span id="tvm-results-count" style="font-size:11px; font-weight:700; color:#2271b1; background:#e7f3ff; padding:2px 8px; border-radius:10px; margin-right:5px;">${count} shown</span>`);
