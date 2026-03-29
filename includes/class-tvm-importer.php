@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer Logic
- * Version 1.8.4 - Idempotent Progress Linking
+ * Version 1.9.0 - Added Watchmode Episode & Source Sync
  *
  * @package TV_Movie_Tracker
- * @version 1.8.4
+ * @version 1.9.0
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -71,8 +71,9 @@ class TVM_Importer {
 		$type    = get_post_meta( $post_id, '_tvm_media_type', true );
 		$tmdb_id = get_post_meta( $post_id, '_tvm_tmdb_id', true );
 		$tvdb_id = get_post_meta( $post_id, '_tvm_tvdb_id', true );
+		$imdb_id = get_post_meta( $post_id, '_tvm_imdb_id', true );
 
-		// 1. ENSURE USER PROGRESS LINK EXISTS (The Fix for ID 402)
+		// 1. ENSURE USER PROGRESS LINK EXISTS
 		$existing_link = $wpdb->get_var( $wpdb->prepare(
 			"SELECT id FROM $progress_table WHERE user_id = %d AND item_id = %d AND season_number = 0",
 			$user_id, $post_id
@@ -95,35 +96,54 @@ class TVM_Importer {
 			$details = $api->get_details( $tmdb_id, 'tv' );
 			if ( ! is_wp_error( $details ) ) {
 				$tvdb_id = $details['external_ids']['tvdb_id'] ?? 0;
+				$imdb_id = $details['external_ids']['imdb_id'] ?? '';
 				update_post_meta( $post_id, '_tvm_tvdb_id', $tvdb_id );
-				update_post_meta( $post_id, '_tvm_imdb_id', $details['external_ids']['imdb_id'] ?? '' );
+				update_post_meta( $post_id, '_tvm_imdb_id', $imdb_id );
 			}
 		}
 
-		// 3. SYNC EPISODES
-		if ( 'tv' === $type && $tvdb_id ) {
-			return $this->import_episodes( $post_id, $tvdb_id );
+		// 3. SYNC EPISODES & STREAMING
+		if ( 'tv' === $type ) {
+			return $this->import_episodes( $post_id, $tvdb_id, $imdb_id );
 		}
 		return "Sync complete.";
 	}
 
-	private function import_episodes( $parent_post_id, $tvdb_id ) {
+	private function import_episodes( $parent_post_id, $tvdb_id, $imdb_id ) {
+		// A. Fetch Metadata from TVMaze
 		$tvmaze = new TVM_API_TVMAZE();
 		$lookup = $tvmaze->get_id_by_external( $tvdb_id );
-		
-		if ( is_wp_error( $lookup ) || ! isset( $lookup['id'] ) ) {
-			return "No TVMaze match found.";
+		$episodes = array();
+
+		if ( ! is_wp_error( $lookup ) && isset( $lookup['id'] ) ) {
+			$episodes = $tvmaze->get_episodes( $lookup['id'] );
 		}
 
-		$episodes = $tvmaze->get_episodes( $lookup['id'] );
-		if ( ! is_array( $episodes ) || empty( $episodes ) ) {
-			return "No episodes found.";
+		if ( empty( $episodes ) ) {
+			return "No episode metadata found.";
+		}
+
+		// B. Fetch Streaming Sources from Watchmode (One Call for All Episodes)
+		$watchmode = new TVM_API_WATCHMODE();
+		$wm_data = $watchmode->get_all_episodes_data( $imdb_id );
+		$streaming_map = array();
+
+		if ( ! is_wp_error( $wm_data ) && is_array( $wm_data ) ) {
+			foreach ( $wm_data as $wm_ep ) {
+				$key = "S" . $wm_ep['season_number'] . "E" . $wm_ep['episode_number'];
+				$streaming_map[$key] = array(
+					'sources'  => $wm_ep['sources'] ?? array(),
+					'overview' => $wm_ep['overview'] ?? ''
+				);
+			}
 		}
 
 		global $wpdb;
+		$count = 0;
 		foreach ( $episodes as $ep ) {
 			$s = absint( $ep['season'] );
 			$n = absint( $ep['number'] );
+			$ep_key = "S{$s}E{$n}";
 
 			$episode_id = $wpdb->get_var( $wpdb->prepare(
 				"SELECT p.ID FROM $wpdb->posts p 
@@ -151,8 +171,22 @@ class TVM_Importer {
 				update_post_meta( $episode_id, '_tvm_season', $s );
 				update_post_meta( $episode_id, '_tvm_number', $n );
 				update_post_meta( $episode_id, '_tvm_air_date', $ep['airdate'] );
+
+				// C. Attach Streaming Data if available
+				if ( isset( $streaming_map[$ep_key] ) ) {
+					update_post_meta( $episode_id, '_tvm_episode_sources', $streaming_map[$ep_key]['sources'] );
+					// Update description if Watchmode has a better one
+					if ( ! empty( $streaming_map[$ep_key]['overview'] ) ) {
+						$wpdb->update( $wpdb->posts, array( 'post_content' => $streaming_map[$ep_key]['overview'] ), array( 'ID' => $episode_id ) );
+					}
+				}
+				$count++;
 			}
 		}
-		return "Success: Processed " . count($episodes) . " episodes.";
+
+		// Update Last Sync Timestamp
+		update_post_meta( $parent_post_id, '_tvm_last_sync', current_time( 'mysql' ) );
+
+		return "Success: Processed {$count} episodes with streaming data.";
 	}
 }
