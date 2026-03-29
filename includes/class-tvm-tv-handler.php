@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX TV Watchlist Handler
- * Version 1.0.6 - Stats Restoration
+ * Version 1.0.7 - Context-Aware Streaming Logic
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -120,7 +120,7 @@ class TVM_TV_Handler {
 				$ep_watched_count = 0;
 				$aired_unwatched_count = 0;
 				$has_upcoming = false;
-				$has_streaming = false;
+				$has_unwatched_streaming = false;
 
 				if ( $ep_count > 0 ) {
                     $tv_ep_total += $ep_count;
@@ -140,14 +140,15 @@ class TVM_TV_Handler {
 
 						if ( $is_future ) $has_upcoming = true;
 
-						if ( ! $has_streaming && ! empty( $ep->sources ) ) {
+                        // FIX: Only flag series as 'streaming' if an unwatched, aired episode is available
+						if ( ! $has_unwatched_streaming && ! $is_watched && ! $is_future && ! empty( $ep->sources ) ) {
 							$sources = maybe_unserialize( $ep->sources );
 							if ( is_array( $sources ) ) {
 								foreach ( $sources as $s ) {
 									if ( in_array( $s['type'], array( 'rent', 'buy', 'purchase' ) ) ) continue;
 									if ( ! in_array( (int)$s['source_id'], $user_services ) ) continue;
 									if ( ( $s['type'] === 'sub' && strtoupper($s['region']) === $primary_region ) || $s['type'] === 'free' ) {
-										$has_streaming = true;
+										$has_unwatched_streaming = true;
 										break;
 									}
 								}
@@ -166,7 +167,7 @@ class TVM_TV_Handler {
 					'aired_unwatched_count' => $aired_unwatched_count,
 					'has_aired_unwatched'   => ( $aired_unwatched_count > 0 ),
 					'has_upcoming'          => $has_upcoming,
-					'has_streaming'         => $has_streaming,
+					'has_streaming'         => $has_unwatched_streaming,
 					'last_sync'             => $last_sync ? date( 'M j, g:i a', strtotime( $last_sync ) ) : 'Never'
 				);
 			}
