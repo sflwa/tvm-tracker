@@ -1,7 +1,10 @@
 <?php
 /**
  * AJAX TV Watchlist Handler
- * Version 1.0.1 - Added Sync Metadata
+ * Version 1.0.2 - Refined Filter Logic & Human Dates
+ *
+ * @package TV_Movie_Tracker
+ * @version 1.0.2
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -40,7 +43,7 @@ class TVM_TV_Handler {
 		) );
 
 		$watchlist = array();
-		$today     = current_time( 'Y-m-d' );
+		$today_str = current_time( 'Y-m-d' );
 		$total_eps = 0;
 		$watched_eps = 0;
 
@@ -49,45 +52,69 @@ class TVM_TV_Handler {
 				$query->the_post();
 				$id = get_the_ID();
 
-				// Aggregation Engine
-				$ep_ids = $wpdb->get_col( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_tvm_parent_id' AND meta_value = %d", $id ) );
+				// 1. Get all episode IDs and their air dates
+				$ep_data = $wpdb->get_results( $wpdb->prepare( 
+					"SELECT post_id, meta_value as air_date 
+					 FROM $wpdb->postmeta 
+					 WHERE meta_key = '_tvm_air_date' 
+					 AND post_id IN (SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_tvm_parent_id' AND meta_value = %d)", 
+					$id 
+				) );
+
+				$ep_ids = wp_list_pluck( $ep_data, 'post_id' );
 				$ep_count = count( $ep_ids );
-				$ep_watched = 0;
+				$ep_watched_count = 0;
 				$has_upcoming = false;
+				$has_aired_unwatched = false;
 
 				if ( $ep_count > 0 ) {
-					$ep_watched = (int) $wpdb->get_var( $wpdb->prepare(
-						"SELECT COUNT(*) FROM $progress_table WHERE user_id = %d AND item_id = %d AND episode_id IN (" . implode( ',', array_map( 'intval', $ep_ids ) ) . ") AND watched_at IS NOT NULL",
+					// 2. Count watched episodes
+					$ep_watched_count = (int) $wpdb->get_var( $wpdb->prepare(
+						"SELECT COUNT(*) FROM $progress_table 
+						 WHERE user_id = %d AND item_id = %d 
+						 AND episode_id IN (" . implode( ',', array_map( 'intval', $ep_ids ) ) . ") 
+						 AND watched_at IS NOT NULL",
 						$user_id, $id
 					) );
 
-					$upcoming_check = $wpdb->get_var( $wpdb->prepare(
-						"SELECT post_id FROM $wpdb->postmeta WHERE post_id IN (" . implode( ',', array_map( 'intval', $ep_ids ) ) . ") AND meta_key = '_tvm_air_date' AND meta_value > %s LIMIT 1",
-						$today
-					) );
-					$has_upcoming = ! empty( $upcoming_check );
+					// 3. Identify Filter States
+					foreach ( $ep_data as $ep ) {
+						$is_future = ( $ep->air_date && $ep->air_date > $today_str );
+						if ( $is_future ) {
+							$has_upcoming = true;
+						} else {
+							// It has aired - check if user has NOT watched it
+							$is_watched = $wpdb->get_var( $wpdb->prepare(
+								"SELECT id FROM $progress_table WHERE user_id = %d AND episode_id = %d AND watched_at IS NOT NULL",
+								$user_id, $ep->post_id
+							) );
+							if ( ! $is_watched ) {
+								$has_aired_unwatched = true;
+							}
+						}
+					}
 				}
 
-				// Retrieve Last Sync Metadata
 				$last_sync = get_post_meta( $id, '_tvm_last_sync', true );
 				$formatted_sync = $last_sync ? date( 'M j, g:i a', strtotime( $last_sync ) ) : 'Never';
 
 				$watchlist[] = array(
-					'id'           => $id,
-					'title'        => get_the_title(),
-					'type'         => 'tv',
-					'poster_path'  => get_post_meta( $id, '_tvm_poster_path', true ),
-					'tmdb_id'      => get_post_meta( $id, '_tvm_tmdb_id', true ),
-					'ep_count'     => $ep_count,
-					'ep_watched'   => $ep_watched,
-					'is_watched'   => ( $ep_count > 0 && $ep_watched >= $ep_count ),
-					'status'       => $has_upcoming ? 'upcoming' : 'released',
-					'has_upcoming' => $has_upcoming,
-					'last_sync'    => $formatted_sync
+					'id'                  => $id,
+					'title'               => get_the_title(),
+					'type'                => 'tv',
+					'poster_path'         => get_post_meta( $id, '_tvm_poster_path', true ),
+					'tmdb_id'             => get_post_meta( $id, '_tvm_tmdb_id', true ),
+					'ep_count'            => $ep_count,
+					'ep_watched'          => $ep_watched_count,
+					'is_watched_any'      => ( $ep_watched_count > 0 ), // For "Watched" filter
+					'has_aired_unwatched' => $has_aired_unwatched,     // For "Unwatched" filter
+					'has_upcoming'        => $has_upcoming,            // For "Upcoming" filter
+					'status'              => $has_upcoming ? 'upcoming' : 'released',
+					'last_sync'           => $formatted_sync
 				);
 
 				$total_eps += $ep_count;
-				$watched_eps += $ep_watched;
+				$watched_eps += $ep_watched_count;
 			}
 			wp_reset_postdata();
 		}
