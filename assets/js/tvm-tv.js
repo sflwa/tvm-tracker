@@ -1,65 +1,46 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version 1.1.0 - Added Sync & Streaming Support
+ * Version 1.1.1 - UI Rendering Fix
  */
 jQuery(function($) {
     const TVModule = {
         init: function() {
             $(document).on('tvm_tab_switch', (e, tab) => {
-                if (tab === 'watchlist' && window.current_media_type === 'tv') {
-                    this.load();
-                }
+                if (tab === 'watchlist' && window.current_media_type === 'tv') this.load();
             });
             $(document).on('tvm_filter_change', () => {
                 if (window.current_media_type === 'tv') this.applyFilter();
             });
-            $(document).on('click', '.tvm-tv-trigger', (e) => {
-                this.showSeriesDetails($(e.currentTarget).data('id'));
-            });
+            $(document).on('click', '.tvm-tv-trigger', (e) => this.showSeriesDetails($(e.currentTarget).data('id')));
 
-            // Handle Episode Sync
             $(document).on('click', '#tvm-sync-episodes', (e) => {
                 const $btn = $(e.currentTarget);
                 const id = $btn.data('id');
                 $btn.prop('disabled', true).text('Syncing...');
-                
-                $.post(tvm_app.ajax_url, { 
-                    action: 'tvm_sync_series', 
-                    post_id: id, 
-                    nonce: tvm_app.nonce 
-                }, (res) => {
+                $.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: id, nonce: tvm_app.nonce }, (res) => {
                     $btn.prop('disabled', false).text('Sync Episodes');
-                    if (res.success) {
-                        alert(res.data);
-                        this.loadEpisodes(id); // Refresh view
-                    }
+                    if (res.success) { alert(res.data); this.loadEpisodes(id); }
                 });
             });
 
-            // Handle Episode Watch Toggle
             $(document).on('click', '.tvm-ep-watch', (e) => {
                 const $btn = $(e.currentTarget);
-                const epId = $btn.data('id');
-                const watched = $btn.data('watched');
-                
                 $.post(tvm_app.ajax_url, { 
                     action: 'tvm_toggle_episode_watched', 
-                    episode_id: epId, 
-                    watched: watched, 
+                    episode_id: $btn.data('id'), 
+                    watched: $btn.data('watched'), 
                     nonce: tvm_app.nonce 
                 }, () => {
-                    this.loadEpisodes($btn.closest('#tvm-tv-detail-view').find('#tvm-sync-episodes').data('id'));
-                    this.load(); // Refresh stats
+                    const seriesId = $('#tvm-sync-episodes').data('id');
+                    this.loadEpisodes(seriesId);
+                    this.load();
                 });
             });
         },
 
         load: function() {
             TVM_Core.showLoading();
-            $.post(tvm_app.ajax_url, { 
-                action: 'tvm_get_tv_watchlist', 
-                nonce: tvm_app.nonce 
-            }, (res) => {
+            $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_watchlist', nonce: tvm_app.nonce }, (res) => {
                 TVM_Core.hideLoading();
                 if (res.success) {
                     window.tvm_tv_cache = res.data.items;
@@ -70,22 +51,18 @@ jQuery(function($) {
         },
 
         updateStats: function(s) {
-            const html = `TV: ${s.series} Series • ${s.episodes} Episodes • ${s.watched} Watched • ${s.percent}%`;
-            $('#tvm-stats-display').html(html);
+            $('#tvm-stats-display').html(`TV: ${s.series} Series • ${s.episodes} Episodes • ${s.watched} Watched • ${s.percent}%`);
         },
 
         applyFilter: function() {
             const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
             const search = $('#tvm-vault-search-input').val().toLowerCase();
             let items = [...(window.tvm_tv_cache || [])];
-
             if (filter === 'watched') items = items.filter(i => i.is_watched);
             else if (filter === 'released') items = items.filter(i => i.ep_watched < i.ep_count);
             else if (filter === 'upcoming') items = items.filter(i => i.has_upcoming);
-
             if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
             items.sort((a, b) => a.title.localeCompare(b.title));
-
             TVM_Core.updateCounter(items.length);
             this.render(items);
         },
@@ -93,11 +70,10 @@ jQuery(function($) {
         render: function(items) {
             let html = '';
             items.forEach(item => {
-                const statBadge = `<div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>`;
                 html += `
                 <div class="tvm-movie-card">
                     <div class="tvm-poster-wrapper">
-                        ${statBadge}
+                        <div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>
                         <div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;">
                             <img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">
                         </div>
@@ -155,27 +131,18 @@ jQuery(function($) {
 
         renderSources: function(sources) {
             if (!sources || !Array.isArray(sources)) return '';
-            
             const userServices = window.tvm_settings_data.user_services || [];
             const primaryRegion = (window.tvm_settings_data.primary_region || 'US').toUpperCase();
             let html = '';
 
             sources.forEach(s => {
                 const sid = parseInt(s.source_id);
-                const type = s.type;
-                const reg = s.region.toUpperCase();
-
-                // Rule 3: No Rent or Buy
-                if (['rent', 'buy', 'purchase'].includes(type)) return;
-
-                // Rule 1 & 2: Paid (Primary Only) or Free (Any)
+                if (['rent', 'buy', 'purchase'].includes(s.type)) return;
                 if (userServices.includes(sid)) {
-                    if (type === 'free' || (type === 'sub' && reg === primaryRegion)) {
-                        // Find logo from master sources
+                    if (s.type === 'free' || (s.type === 'sub' && s.region.toUpperCase() === primaryRegion)) {
                         const master = window.tvm_settings_data.master_sources.find(m => m.id == sid);
-                        const logo = master ? master.logo_100px : '';
-                        if (logo) {
-                            html += `<img src="${logo}" title="${s.name} (${reg})" style="width:28px; height:28px; border-radius:4px; object-fit:contain; border:1px solid #eee;">`;
+                        if (master && master.logo_100px) {
+                            html += `<img src="${master.logo_100px}" title="${s.name}" style="width:28px; height:28px; border-radius:4px; border:1px solid #eee; object-fit:contain;">`;
                         }
                     }
                 }
