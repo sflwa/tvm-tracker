@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - Search Logic
- * Version 1.0.1 - Added Processing State
+ * Version 1.0.2 - Handshake Fix
  */
 jQuery(function($) {
 
@@ -32,7 +32,6 @@ jQuery(function($) {
                     const imgHtml = poster ? `<img src="${poster}" style="width:100%; border-radius:8px; display:block;">` : 
                                             `<div style="width:100%; aspect-ratio:2/3; background:#f0f0f0; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #ddd;"><span class="dashicons dashicons-format-video" style="font-size:40px; color:#ccc; width:40px; height:40px;"></span></div>`;
                     
-                    // Disable button if already tracked in vault
                     const btnLabel = item.is_tracked ? 'In Vault' : 'Track';
                     const btnAttr = item.is_tracked ? 'disabled' : '';
                     const btnStyle = item.is_tracked ? 'background:#eee; color:#999; border:none; cursor:default;' : '';
@@ -58,24 +57,26 @@ jQuery(function($) {
     $(document).on('click', '.tvm-frontend-import-btn', function() {
         const btn = $(this);
         
-        // Apply "Processing" state to indicate background sync activity
+        // 1. Set visual processing state immediately
         btn.prop('disabled', true).text('Processing...');
         
         $.post(tvm_app.ajax_url, { 
-            action: 'tvm_import_item', 
+            action: 'tvm_import_item', // Mapped to TVM_Importer
             tmdb_id: btn.data('id'), 
             type: btn.data('type'), 
-            watched: btn.data('watched'), 
             nonce: tvm_app.nonce 
         }, function(response) {
             if (response.success) {
-                // Change to permanent "In Vault" state once complete
+                // 2. Lock state on success
                 btn.text('In Vault').css({'background':'#eee', 'color':'#999', 'border':'none'}).prop('disabled', true);
             } else {
-                // If failed, restore button to let user try again
+                // 3. Revert on error
                 alert('Import failed: ' + (response.data || 'Unknown error'));
                 btn.prop('disabled', false).text('Track');
             }
+        }).fail(function() {
+            alert('Server error: 400. Contact developer.');
+            btn.prop('disabled', false).text('Track');
         });
     });
 
