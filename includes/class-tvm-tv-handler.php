@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX TV Watchlist Handler
- * Version 1.0.0 - Aggregation Focused
+ * Version 1.0.1 - Added Sync Metadata
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -68,6 +68,10 @@ class TVM_TV_Handler {
 					$has_upcoming = ! empty( $upcoming_check );
 				}
 
+				// Retrieve Last Sync Metadata
+				$last_sync = get_post_meta( $id, '_tvm_last_sync', true );
+				$formatted_sync = $last_sync ? date( 'M j, g:i a', strtotime( $last_sync ) ) : 'Never';
+
 				$watchlist[] = array(
 					'id'           => $id,
 					'title'        => get_the_title(),
@@ -78,7 +82,8 @@ class TVM_TV_Handler {
 					'ep_watched'   => $ep_watched,
 					'is_watched'   => ( $ep_count > 0 && $ep_watched >= $ep_count ),
 					'status'       => $has_upcoming ? 'upcoming' : 'released',
-					'has_upcoming' => $has_upcoming
+					'has_upcoming' => $has_upcoming,
+					'last_sync'    => $formatted_sync
 				);
 
 				$total_eps += $ep_count;
