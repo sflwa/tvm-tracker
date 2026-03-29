@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.1.6
+ * Version: 1.1.7
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -23,7 +23,7 @@ jQuery(function($) {
                 this.showSeriesDetails($(e.currentTarget).data('id'));
             });
 
-            // FIX: Back to Shows Navigation
+            // Back to Shows Navigation
             $(document).on('click', '#tvm-back-to-grid', (e) => {
                 e.preventDefault();
                 $('#tvm-tv-detail-view').hide();
@@ -63,7 +63,7 @@ jQuery(function($) {
                 }, () => {
                     const seriesId = $('#tvm-sync-episodes').data('id');
                     this.loadEpisodes(seriesId);
-                    this.load(); // Refresh global stats
+                    this.load(); 
                 });
             });
         },
@@ -155,7 +155,9 @@ jQuery(function($) {
                                     <div style="font-size:12px; color:#999; margin-top:4px;">Air Date: ${ep.air_date || 'TBA'}</div>
                                 </div>
                                 <div style="display:flex; align-items:center; gap:15px;">
-                                    <div class="tvm-episode-sources" style="display:flex; gap:6px;">${sourceIcons}</div>
+                                    <div class="tvm-episode-sources" style="display:flex; gap:6px;">
+                                        ${sourceIcons}
+                                    </div>
                                     <span class="dashicons ${ep.is_watched ? 'dashicons-visibility' : 'dashicons-hidden'} tvm-ep-watch" 
                                           data-id="${ep.id}" 
                                           data-watched="${!ep.is_watched}" 
@@ -171,7 +173,9 @@ jQuery(function($) {
         },
 
         renderSources: function(sources) {
-            if (!sources || !Array.isArray(sources)) return '';
+            if (!sources || !Array.isArray(sources) || sources.length === 0) {
+                return '<span style="font-size: 10px; color: #999; text-transform: uppercase; background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-weight: 700;">No Sources</span>';
+            }
             
             const settings = window.tvm_settings_data || {};
             const userServices = settings.user_services || [];
@@ -179,6 +183,7 @@ jQuery(function($) {
             const masterList = settings.master_sources || [];
             
             let html = '';
+            let validSourceCount = 0;
 
             sources.forEach(s => {
                 const sid = parseInt(s.source_id);
@@ -194,11 +199,13 @@ jQuery(function($) {
                         const master = masterList.find(m => m.id == sid);
                         if (master && master.logo_100px) {
                             html += `<img src="${master.logo_100px}" title="${s.name} (${s.region})" style="width:28px; height:28px; border-radius:4px; border:1px solid #eee; object-fit:contain;">`;
+                            validSourceCount++;
                         }
                     }
                 }
             });
-            return html;
+
+            return (validSourceCount > 0) ? html : '<span style="font-size: 10px; color: #999; text-transform: uppercase; background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-weight: 700;">No Sources</span>';
         }
     };
     TVModule.init();
