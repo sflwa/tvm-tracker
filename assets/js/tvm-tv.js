@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.1.8 - Finalized Source Display
+ * Version: 1.1.9 - Settings Synchronization Fix
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -107,6 +107,20 @@ jQuery(function($) {
         },
 
         loadEpisodes: function(id) {
+            // Pre-flight check: ensure settings are loaded before rendering episodes
+            if (!window.tvm_settings_data || !window.tvm_settings_data.master_sources || window.tvm_settings_data.master_sources.length === 0) {
+                $.post(tvm_app.ajax_url, { action: 'tvm_get_settings', nonce: tvm_app.nonce }, (res) => {
+                    if (res.success) {
+                        window.tvm_settings_data = res.data.raw;
+                        this.fetchEpisodeData(id);
+                    }
+                });
+            } else {
+                this.fetchEpisodeData(id);
+            }
+        },
+
+        fetchEpisodeData: function(id) {
             $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_episodes', post_id: id, nonce: tvm_app.nonce }, (res) => {
                 if (res.success) {
                     let epHtml = '<div class="tvm-episode-list" style="display:flex; flex-direction:column; gap:12px;">';
@@ -152,8 +166,12 @@ jQuery(function($) {
             sources.forEach(s => {
                 const sid = parseInt(s.source_id);
                 if (['rent', 'buy', 'purchase'].includes(s.type)) return;
+                
                 if (userServices.includes(sid)) {
-                    if (s.type === 'free' || (s.type === 'sub' && s.region.toUpperCase() === primaryRegion)) {
+                    const isPaidMatch = (s.type === 'sub' && s.region.toUpperCase() === primaryRegion);
+                    const isFreeMatch = (s.type === 'free');
+
+                    if (isPaidMatch || isFreeMatch) {
                         const master = masterList.find(m => m.id == sid);
                         if (master && master.logo_100px) {
                             html += `<img src="${master.logo_100px}" title="${s.name}" style="width:28px; height:28px; border-radius:4px; border:1px solid #eee; object-fit:contain;">`;
