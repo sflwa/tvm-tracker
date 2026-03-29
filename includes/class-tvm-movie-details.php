@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX Movie Details Handler
- * Version 1.0.1 - Strict Streaming Rules
+ * Version 1.0.2 - On-Demand Sync for Watched Movies (Preserved Structure)
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -20,9 +20,22 @@ class TVM_Movie_Details {
 		if ( ! $post_id ) { wp_send_json_error( 'Invalid ID' ); }
 
 		$user_id = get_current_user_id();
+
+		// LOGIC: If watched & last sync was > 30 days ago, trigger silent on-demand sync
+		$last_sync = get_post_meta( $post_id, '_tvm_last_sync', true );
+		$is_watched = $this->is_watched( $user_id, $post_id );
+
+		if ( $is_watched && ( ! $last_sync || strtotime( $last_sync ) < strtotime( '-30 days' ) ) ) {
+			// Trigger the watchmode sync logic from the importer
+			if ( class_exists( 'TVM_Importer' ) ) {
+				$importer = new TVM_Importer();
+				$importer->handle_sync_logic( $post_id );
+			}
+		}
+
 		$all_sources = get_post_meta( $post_id, '_tvm_streaming_sources', true ) ?: array();
 		$overview    = get_post_field( 'post_content', $post_id );
-        $title       = html_entity_decode( get_the_title( $post_id ), ENT_QUOTES, 'UTF-8' );
+		$title       = html_entity_decode( get_the_title( $post_id ), ENT_QUOTES, 'UTF-8' );
 		
 		$user_services  = get_user_meta( $user_id, 'tvm_user_services', true ) ?: array();
 		$primary_region = get_user_meta( $user_id, 'tvm_primary_region', true ) ?: 'US';
@@ -39,21 +52,21 @@ class TVM_Movie_Details {
 			$source_type = isset( $source_map[$provider_id] ) ? $source_map[$provider_id]['type'] : 'sub';
 			$region      = isset( $source['region'] ) ? strtoupper( $source['region'] ) : '';
 
-            // Rule 3: No Rental or Buy
-            if ( in_array($source_type, array('rent', 'buy', 'purchase')) ) continue;
+			// Rule 3: No Rental or Buy
+			if ( in_array($source_type, array('rent', 'buy', 'purchase')) ) continue;
 
-            // Rule 1: Paid (sub) - Only Primary Region
-            if ( $source_type === 'sub' ) {
-                if ( ! in_array( $provider_id, $user_services ) ) continue;
-                if ( $region !== strtoupper($primary_region) ) continue;
-                $streaming[$provider_id . '_' . $region] = $source;
-            } 
-            
-            // Rule 2: Free - Any Region
-            if ( $source_type === 'free' ) {
-                if ( ! in_array( $provider_id, $user_services ) ) continue;
-                $streaming[$provider_id . '_' . $region] = $source;
-            }
+			// Rule 1: Paid (sub) - Only Primary Region
+			if ( $source_type === 'sub' ) {
+				if ( ! in_array( $provider_id, $user_services ) ) continue;
+				if ( $region !== strtoupper($primary_region) ) continue;
+				$streaming[$provider_id . '_' . $region] = $source;
+			} 
+			
+			// Rule 2: Free - Any Region
+			if ( $source_type === 'free' ) {
+				if ( ! in_array( $provider_id, $user_services ) ) continue;
+				$streaming[$provider_id . '_' . $region] = $source;
+			}
 		}
 
 		ob_start();
@@ -83,5 +96,11 @@ class TVM_Movie_Details {
 		
 		$sources_html = ob_get_clean();
 		wp_send_json_success( array( 'title' => $title, 'overview' => $overview, 'sources' => $sources_html ) );
+	}
+
+	private function is_watched( $user_id, $post_id ) {
+		global $wpdb;
+		$progress_table = $wpdb->prefix . 'tvm_user_progress';
+		return (bool) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM $progress_table WHERE user_id = %d AND item_id = %d AND watched_at IS NOT NULL", $user_id, $post_id ) );
 	}
 }
