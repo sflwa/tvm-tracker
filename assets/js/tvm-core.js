@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - Core Orchestrator
- * Version 1.9.7 - Dependency Safety Check
+ * Version 1.9.9 - Filter Argument Fix
  */
 jQuery(function($) {
     window.TVM_Core = {
@@ -29,15 +29,33 @@ jQuery(function($) {
     $(document).on('click', '.tvm-type-tab', function() {
         $('.tvm-type-tab').removeClass('active');
         $(this).addClass('active');
-        window.current_media_type = $(this).data('type');
+        const mediaType = $(this).data('type');
+        window.current_media_type = mediaType;
+        
+        // UI Logic: Only show Calendar button for TV
+        if (mediaType === 'tv') {
+            $('.tvm-calendar-toggle').show();
+        } else {
+            $('.tvm-calendar-toggle').hide();
+            // If we were on calendar view and switched to movies, reset filter to 'all'
+            if ($('.tvm-filter-btn.active').data('filter') === 'calendar') {
+                $('.tvm-filter-btn').removeClass('active');
+                $('.tvm-filter-btn[data-filter="all"]').addClass('active');
+            }
+        }
+
         $('#tvm-tv-detail-view').hide();
         $('#tvm-watchlist-grid, .tvm-filters-container').show();
         $(document).trigger('tvm_tab_switch', ['watchlist']);
     });
 
     $(document).on('click', '.tvm-filter-btn', function() {
-        $('.tvm-filter-btn').removeClass('active'); $(this).addClass('active');
-        $(document).trigger('tvm_filter_change');
+        const filter = $(this).data('filter');
+        $('.tvm-filter-btn').removeClass('active'); 
+        $(this).addClass('active');
+        
+        // Pass the filter name as a secondary argument for modules to pick up
+        $(document).trigger('tvm_filter_change', [filter]);
     });
 
     $(document).on('input', '#tvm-vault-search-input', () => $(document).trigger('tvm_filter_change'));
@@ -51,10 +69,14 @@ jQuery(function($) {
     // STARTUP ROUTE
     window.current_media_type = 'tv';
     
-    // Ensure the page is fully ready before triggering the first tab
     $(window).on('load', function() {
         setTimeout(() => {
-            console.log('Core: Orchestrating initial load...');
+            // Default visibility for startup
+            if (window.current_media_type === 'tv') {
+                $('.tvm-calendar-toggle').show();
+            } else {
+                $('.tvm-calendar-toggle').hide();
+            }
             $(document).trigger('tvm_tab_switch', ['watchlist']);
         }, 200);
     });
