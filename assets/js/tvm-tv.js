@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.3.7 - Dropdown Navigation Arrows
+ * Version: 1.3.8 - Restored Delete Icon
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -40,6 +40,23 @@ jQuery(function($) {
                 }
 
                 $dropdown.prop('selectedIndex', nextIndex).trigger('change');
+            });
+
+            // Handle Delete Series
+            $(document).on('click', '.tvm-delete-item', function(e) {
+                e.stopPropagation();
+                const id = $(this).data('id');
+                if (!confirm('Are you sure you want to remove this series and all its progress?')) return;
+                
+                $.post(tvm_app.ajax_url, {
+                    action: 'tvm_delete_item',
+                    post_id: id,
+                    nonce: tvm_app.nonce
+                }, (res) => {
+                    if (res.success) {
+                        TVModule.load();
+                    }
+                });
             });
 
             $(document).on('click', '#tvm-back-to-grid', (e) => {
@@ -126,7 +143,6 @@ jQuery(function($) {
             let html = '';
             
             if (isUnwatchedView) {
-                // UI: Dropdown with Navigation Arrows
                 html += `
                 <div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;">
                     <div style="display:flex; align-items:center; gap:10px;">
@@ -143,6 +159,9 @@ jQuery(function($) {
             } else {
                 html = items.map(item => `
                     <div class="tvm-movie-card">
+                        <div class="tvm-overlay-controls">
+                            <span class="dashicons dashicons-trash tvm-delete-item" data-id="${item.id}" style="color:#ff4d4d;" title="Remove Series"></span>
+                        </div>
                         <div class="tvm-poster-wrapper">
                             <div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>
                             <div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;">
@@ -158,7 +177,6 @@ jQuery(function($) {
 
         showInlineEpisodes: function(id) {
             const item = window.tvm_tv_cache.find(i => i.id == id);
-            // Removed border-top per request
             $('#tvm-unwatched-inline-container').show().html(`
                 <div style="padding-top:10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
@@ -214,7 +232,6 @@ jQuery(function($) {
                         navHtml += `<button class="tvm-season-tab ${isActive ? 'active' : ''}" data-season="${sNum}" style="border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; transition:0.2s; ${tabStyle}">Season ${sNum}</button>`;
                         contentHtml += `<div id="tvm-season-group-${sNum}" class="tvm-season-content-group" style="display:${isActive ? 'flex' : 'none'}; flex-direction:column; gap:12px;">`;
                         
-                        // Updated button color to white/primary background
                         contentHtml += `
                             <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
                                 <button class="tvm-mark-season-watched button button-primary button-small" style="font-size:10px; font-weight:700;">Mark Full Season Watched</button>
