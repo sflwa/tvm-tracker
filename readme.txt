@@ -21,6 +21,15 @@ Key Features:
 * **Progress Tracking**: Mark movies as watched or drill down into TV series to track individual episode progress.
 * **Modular JS/PHP**: Uses a core orchestrator to manage specialized modules for Search, Settings, Movies, and TV.
 
+== Dependencies & Credits ==
+
+This plugin relies on the following third-party services for its core functionality:
+
+* **TMDb (The Movie Database)**: Provides primary movie and TV metadata, including posters, overviews, and IDs. (This product uses the TMDb API but is not endorsed or certified by TMDb.)
+* **TVmaze**: Provides detailed episode-level scheduling, summaries, and air dates for television series.
+* **Watchmode**: Powers the streaming source discovery, provider logos, and deep-linking to various streaming platforms.
+
+
 == Installation ==
 
 1. Upload the `tvm-tracker` folder to the `/wp-content/plugins/` directory.
@@ -38,6 +47,13 @@ The plugin automatically flags these as "TBA" and moves them to the Upcoming fil
 
 == Changelog ==
 
+= 2.0.0 =
+* NEW: Automation Health dashboard in Admin Settings.
+* NEW: Custom "Monthly" cron interval for streaming data refresh.
+* FIX: Contextual "Stream Only" logic for TV shows (hides shows with no streamable unwatched episodes).
+* FIX: Added "Self-Healing" cron registration to prevent inactive sync events.
+* FIX: Improved data integrity by saving Status and Release Date on initial import.
+
 = 1.9.7 =
 * Finalized modular split between Movie and TV JS/PHP handlers.
 * Implemented strict streaming logic (Rule 1: Paid/Primary, Rule 2: Free/Any).
@@ -45,3 +61,11 @@ The plugin automatically flags these as "TBA" and moves them to the Upcoming fil
 * Restored "X DAYS" badges and TBA sorting for movies.
 * Fixed modal encoding for special characters in titles.
 * Added stylized Dashicon placeholders for missing poster art.
+
+= 1.9.0 =
+* Added support for multiple regions (US/CA) in user settings.
+* Implemented TV Season "Mark All Watched" functionality.
+* Integrated TVmaze for enhanced episode metadata.
+
+= 1.0.0 =
+* Initial release with TMDb and Watchmode integration.
