@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX Search Handler for TMDb
- * Version 1.0.7 - Aligned with tvm-search.js Alpha Logic
+ * Version 1.0.8 - Explicit Handshake Verification
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class TVM_Search_Handler {
 
 	public function __construct() {
-		// Matching the action in your tvm-search.js
+		// Matches assets/js/tvm-search.js exactly
 		add_action( 'wp_ajax_tvm_search_tmdb_alpha', array( $this, 'handle_search' ) );
 	}
 
@@ -19,7 +19,12 @@ class TVM_Search_Handler {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		
 		$query = isset( $_POST['query'] ) ? sanitize_text_field( $_POST['query'] ) : '';
-		$api   = TVM_Tracker::get_instance()->tmdb;
+		
+		if ( empty( $query ) ) {
+			wp_send_json_error( 'Search query is empty.' );
+		}
+
+		$api = TVM_Tracker::get_instance()->tmdb;
 		$results = $api->search( $query );
 
 		if ( is_wp_error( $results ) ) {
@@ -30,7 +35,7 @@ class TVM_Search_Handler {
 		$user_id        = get_current_user_id();
 		$progress_table = $wpdb->prefix . 'tvm_user_progress';
 
-		// Identify TMDb IDs already in this user's vault
+		// Track current items to disable buttons for things already in vault
 		$tracked_ids = $wpdb->get_col(
 			$wpdb->prepare(
 				"SELECT m.meta_value FROM $wpdb->postmeta m 
@@ -43,13 +48,12 @@ class TVM_Search_Handler {
 		foreach ( $results as &$item ) {
 			$item['is_tracked'] = in_array( (string) $item['id'], $tracked_ids, true );
 			
-			// GOLDEN RULE: Standardize the media_type for the frontend loop
 			if ( ! isset( $item['media_type'] ) ) {
 				$item['media_type'] = isset( $item['title'] ) ? 'movie' : 'tv';
 			}
 		}
 
-		// Sort Alphabetically per Golden Rule #5
+		// Alphabetical Sort
 		usort( $results, function( $a, $b ) {
 			$titleA = $a['title'] ?? $a['name'] ?? '';
 			$titleB = $b['title'] ?? $b['name'] ?? '';
