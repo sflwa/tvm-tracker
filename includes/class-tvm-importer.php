@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.0.6 - Delete Functionality Restored
+ * Version 2.0.7 - Smart Upsert (Prevents Duplication)
  *
  * @package TV_Movie_Tracker
- * @version 2.0.6
+ * @version 2.0.7
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -17,7 +17,7 @@ class TVM_Importer {
 		// AJAX Hooks
 		add_action( 'wp_ajax_tvm_import_item', array( $this, 'handle_import' ) );
 		add_action( 'wp_ajax_tvm_sync_series', array( $this, 'handle_manual_sync' ) );
-		add_action( 'wp_ajax_tvm_delete_item', array( $this, 'handle_delete' ) ); // RESTORED
+		add_action( 'wp_ajax_tvm_delete_item', array( $this, 'handle_delete' ) );
 		
 		// Automation Hooks (WP-Cron)
 		add_action( 'tvm_weekly_sync_event', array( $this, 'run_weekly_sync' ) );
@@ -31,9 +31,6 @@ class TVM_Importer {
 		}
 	}
 
-	/**
-	 * Deletes a series/movie and its associated user progress
-	 */
 	public function handle_delete() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
@@ -42,12 +39,7 @@ class TVM_Importer {
 		global $wpdb;
 		$user_id = get_current_user_id();
 		$table = $wpdb->prefix . 'tvm_user_progress';
-
-		// 1. Remove user-specific tracking records
 		$wpdb->delete( $table, array( 'user_id' => $user_id, 'item_id' => $post_id ) );
-
-		// 2. Note: We do NOT delete the global CPT 'tvm_item' post or 'tvm_episode' posts 
-		// because other users might be tracking them. 
 		
 		wp_send_json_success( 'Item removed from your vault.' );
 	}
@@ -161,24 +153,77 @@ class TVM_Importer {
 		update_post_meta( $post_id, '_tvm_last_sync', current_time( 'mysql' ) );
 	}
 
+	/**
+	 * SMART UPSERT: Efficiently finds existing episode by parent/season/number 
+	 * to prevent duplication while updating metadata.
+	 */
 	private function upsert_episode( $parent_id, $ep ) {
 		global $wpdb;
-		$s = absint($ep['season']); $n = absint($ep['number']);
-		$id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} m1 JOIN {$wpdb->postmeta} m2 ON m1.post_id = m2.post_id WHERE m1.meta_key = '_tvm_parent_id' AND m1.meta_value = %d AND m2.meta_key = '_tvm_season' AND m2.meta_value = %d AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m3 WHERE m3.post_id = m1.post_id AND m3.meta_key = '_tvm_number' AND m3.meta_value = %d)", $parent_id, $s, $n ) );
-		if ( ! $id ) {
-			$id = wp_insert_post( array( 'post_title' => sprintf('S%02dE%02d - %s', $s, $n, $ep['name']), 'post_content' => $ep['summary'] ?? '', 'post_status' => 'publish', 'post_type' => 'tvm_episode' ) );
+		$s = absint($ep['season']); 
+		$n = absint($ep['number']);
+
+		// Optimized lookup: Find episode ID where all 3 keys match in one go
+		$episode_id = $wpdb->get_var( $wpdb->prepare(
+			"SELECT p.ID FROM {$wpdb->posts} p
+			 INNER JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id'
+			 INNER JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_season'
+			 INNER JOIN {$wpdb->postmeta} m3 ON p.ID = m3.post_id AND m3.meta_key = '_tvm_number'
+			 WHERE p.post_type = 'tvm_episode' 
+			 AND m1.meta_value = %d 
+			 AND m2.meta_value = %d 
+			 AND m3.meta_value = %d 
+			 LIMIT 1",
+			$parent_id, $s, $n
+		) );
+
+		$title = sprintf('S%02dE%02d - %s', $s, $n, $ep['name']);
+
+		if ( ! $episode_id ) {
+			$episode_id = wp_insert_post( array( 
+				'post_title'   => $title, 
+				'post_content' => $ep['summary'] ?? '', 
+				'post_status'  => 'publish', 
+				'post_type'    => 'tvm_episode' 
+			) );
+		} else {
+			// Update existing to ensure title/summary are fresh
+			wp_update_post( array(
+				'ID'           => $episode_id,
+				'post_title'   => $title,
+				'post_content' => $ep['summary'] ?? ''
+			) );
 		}
-		update_post_meta( $id, '_tvm_parent_id', $parent_id );
-		update_post_meta( $id, '_tvm_season', $s );
-		update_post_meta( $id, '_tvm_number', $n );
-		update_post_meta( $id, '_tvm_air_date', $ep['airdate'] );
+
+		update_post_meta( $episode_id, '_tvm_parent_id', $parent_id );
+		update_post_meta( $episode_id, '_tvm_season', $s );
+		update_post_meta( $episode_id, '_tvm_number', $n );
+		update_post_meta( $episode_id, '_tvm_air_date', $ep['airdate'] );
 	}
 
+	/**
+	 * Updates sources using the same smart lookup logic
+	 */
 	private function update_ep_sources( $parent_id, $wm_ep ) {
 		global $wpdb;
-		$s = absint($wm_ep['season_number']); $n = absint($wm_ep['episode_number']);
-		$id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} m1 JOIN {$wpdb->postmeta} m2 ON m1.post_id = m2.post_id WHERE m1.meta_key = '_tvm_parent_id' AND m1.meta_value = %d AND m2.meta_key = '_tvm_season' AND m2.meta_value = %d AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m3 WHERE m3.post_id = m1.post_id AND m3.meta_key = '_tvm_number' AND m3.meta_value = %d)", $parent_id, $s, $n ) );
-		if ( $id ) { update_post_meta( $id, '_tvm_episode_sources', $wm_ep['sources'] ?? array() ); }
+		$s = absint($wm_ep['season_number']); 
+		$n = absint($wm_ep['episode_number']);
+
+		$episode_id = $wpdb->get_var( $wpdb->prepare(
+			"SELECT p.ID FROM {$wpdb->posts} p
+			 INNER JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id'
+			 INNER JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_season'
+			 INNER JOIN {$wpdb->postmeta} m3 ON p.ID = m3.post_id AND m3.meta_key = '_tvm_number'
+			 WHERE p.post_type = 'tvm_episode' 
+			 AND m1.meta_value = %d 
+			 AND m2.meta_value = %d 
+			 AND m3.meta_value = %d 
+			 LIMIT 1",
+			$parent_id, $s, $n
+		) );
+
+		if ( $episode_id ) { 
+			update_post_meta( $episode_id, '_tvm_episode_sources', $wm_ep['sources'] ?? array() ); 
+		}
 	}
 
 	private function ensure_user_progress( $post_id, $type ) {
