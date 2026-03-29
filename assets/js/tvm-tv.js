@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.4.6 - Stats Restoration & Mobile UI
+ * Version: 1.4.7 - Calendar Logic Fix
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -15,7 +15,15 @@ jQuery(function($) {
             }, 200);
 
             $(document).on('tvm_tab_switch', (e, tab) => {
-                if (tab === 'watchlist' && window.current_media_type === 'tv') this.load();
+                // BUG FIX: Ensure we only load TV data if we are actually on the TV media type
+                if (tab === 'watchlist' && window.current_media_type === 'tv') {
+                    const currentFilter = $('.tvm-filter-btn.active').data('filter');
+                    if (currentFilter === 'calendar') {
+                        this.renderCalendarView();
+                    } else {
+                        this.load();
+                    }
+                }
             });
 
             $(document).on('tvm_filter_change', (e, filter) => {
@@ -134,7 +142,7 @@ jQuery(function($) {
                 TVM_Core.hideLoading();
                 if (res.success) {
                     window.tvm_tv_cache = res.data.items;
-                    this.updateStats(res.data.stats); // Restore Stats Call
+                    this.updateStats(res.data.stats);
                     this.applyFilter();
                 }
             });
