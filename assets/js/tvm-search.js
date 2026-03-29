@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - Search Logic
- * Version 1.0.0
+ * Version 1.0.1 - Added Processing State
  */
 jQuery(function($) {
 
@@ -57,14 +57,25 @@ jQuery(function($) {
 
     $(document).on('click', '.tvm-frontend-import-btn', function() {
         const btn = $(this);
+        
+        // Apply "Processing" state to indicate background sync activity
+        btn.prop('disabled', true).text('Processing...');
+        
         $.post(tvm_app.ajax_url, { 
             action: 'tvm_import_item', 
             tmdb_id: btn.data('id'), 
             type: btn.data('type'), 
             watched: btn.data('watched'), 
             nonce: tvm_app.nonce 
-        }, function() {
-            btn.text('In Vault').css({'background':'#eee', 'color':'#999', 'border':'none'}).prop('disabled', true);
+        }, function(response) {
+            if (response.success) {
+                // Change to permanent "In Vault" state once complete
+                btn.text('In Vault').css({'background':'#eee', 'color':'#999', 'border':'none'}).prop('disabled', true);
+            } else {
+                // If failed, restore button to let user try again
+                alert('Import failed: ' + (response.data || 'Unknown error'));
+                btn.prop('disabled', false).text('Track');
+            }
         });
     });
 
