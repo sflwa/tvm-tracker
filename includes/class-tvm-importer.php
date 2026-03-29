@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.0.4 - Full Feature Lock (Cron + Logic Rules)
+ * Version 2.0.6 - Delete Functionality Restored
  *
  * @package TV_Movie_Tracker
- * @version 2.0.4
+ * @version 2.0.6
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -16,7 +16,8 @@ class TVM_Importer {
 	public function __construct() {
 		// AJAX Hooks
 		add_action( 'wp_ajax_tvm_import_item', array( $this, 'handle_import' ) );
-		add_action( 'wp_ajax_tvm_sync_series', array( $this, 'handle_sync' ) );
+		add_action( 'wp_ajax_tvm_sync_series', array( $this, 'handle_manual_sync' ) );
+		add_action( 'wp_ajax_tvm_delete_item', array( $this, 'handle_delete' ) ); // RESTORED
 		
 		// Automation Hooks (WP-Cron)
 		add_action( 'tvm_weekly_sync_event', array( $this, 'run_weekly_sync' ) );
@@ -31,45 +32,24 @@ class TVM_Importer {
 	}
 
 	/**
-	 * TV WEEKLY AUTOMATION:
-	 * 1) Metadata from TVMaze for all shows (No limit)
-	 * 2) Watchmode for series with unwatched eps AND no sources
+	 * Deletes a series/movie and its associated user progress
 	 */
-	public function run_weekly_sync() {
-		$shows = get_posts( array( 
-			'post_type'  => 'tvm_item', 
-			'posts_per_page' => -1, 
-			'meta_key'   => '_tvm_media_type', 
-			'meta_value' => 'tv' 
-		) );
-		
-		foreach ( $shows as $show ) {
-			$tvdb_id = get_post_meta( $show->ID, '_tvm_tvdb_id', true );
-			
-			// Always sync TVMaze (Metadata truth)
-			$this->sync_tvmaze_metadata( $show->ID, $tvdb_id );
+	public function handle_delete() {
+		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
+		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
+		if ( ! $post_id ) { wp_send_json_error( 'Invalid ID' ); }
 
-			// Conditional Watchmode (Save API calls)
-			if ( $this->needs_watchmode_sync( $show->ID ) ) {
-				$this->sync_watchmode_data( $show->ID );
-			}
-		}
-	}
+		global $wpdb;
+		$user_id = get_current_user_id();
+		$table = $wpdb->prefix . 'tvm_user_progress';
 
-	/**
-	 * MONTHLY AUTOMATION:
-	 * 1) TV: Watchmode for any series with unwatched episodes
-	 * 2) Movies: Watchmode for unwatched movies
-	 */
-	public function run_monthly_sync() {
-		$items = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1 ) );
+		// 1. Remove user-specific tracking records
+		$wpdb->delete( $table, array( 'user_id' => $user_id, 'item_id' => $post_id ) );
+
+		// 2. Note: We do NOT delete the global CPT 'tvm_item' post or 'tvm_episode' posts 
+		// because other users might be tracking them. 
 		
-		foreach ( $items as $item ) {
-			$type = get_post_meta( $item->ID, '_tvm_media_type', true );
-			if ( ! $this->is_item_fully_watched( $item->ID, $type ) ) {
-				$this->sync_watchmode_data( $item->ID );
-			}
-		}
+		wp_send_json_success( 'Item removed from your vault.' );
 	}
 
 	public function handle_import() {
@@ -109,15 +89,49 @@ class TVM_Importer {
 		wp_send_json_success( array( 'post_id' => $post_id ) );
 	}
 
-	public function handle_sync() {
+	public function handle_manual_sync() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		$post_id = absint( $_POST['post_id'] );
-		$tvdb_id = get_post_meta( $post_id, '_tvm_tvdb_id', true );
-
-		$this->sync_tvmaze_metadata( $post_id, $tvdb_id );
+		$this->sync_tvmaze_metadata( $post_id, get_post_meta( $post_id, '_tvm_tvdb_id', true ) );
 		$this->sync_watchmode_data( $post_id );
-		
 		wp_send_json_success( "Manual Sync Complete." );
+	}
+
+	public function run_weekly_sync() {
+		$shows = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1, 'meta_key' => '_tvm_media_type', 'meta_value' => 'tv' ) );
+		foreach ( $shows as $show ) {
+			$this->sync_tvmaze_metadata( $show->ID, get_post_meta( $show->ID, '_tvm_tvdb_id', true ) );
+			if ( $this->needs_watchmode_sync( $show->ID ) ) {
+				$this->sync_watchmode_data( $show->ID );
+			}
+		}
+	}
+
+	public function run_monthly_sync() {
+		$items = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1 ) );
+		foreach ( $items as $item ) {
+			$type = get_post_meta( $item->ID, '_tvm_media_type', true );
+			if ( ! $this->is_item_fully_watched( $item->ID, $type ) ) {
+				$this->sync_watchmode_data( $item->ID );
+			}
+		}
+	}
+
+	public function is_item_fully_watched( $post_id, $type ) {
+		global $wpdb;
+		$table = $wpdb->prefix . 'tvm_user_progress';
+		if ( 'movie' === $type ) {
+			return (bool) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM $table WHERE item_id = %d AND watched_at IS NOT NULL", $post_id ) );
+		} else {
+			$unwatched = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(p.ID) FROM {$wpdb->posts} p JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id' JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_air_date' LEFT JOIN $table prog ON p.ID = prog.episode_id WHERE m1.meta_value = %d AND m2.meta_value <= %s AND (prog.watched_at IS NULL OR prog.watched_at = '')", $post_id, current_time('Y-m-d') ) );
+			return ( $unwatched == 0 );
+		}
+	}
+
+	private function needs_watchmode_sync( $post_id ) {
+		global $wpdb;
+		$has_sources = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_episode_sources' AND post_id IN (SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_parent_id' AND meta_value = %d) AND meta_value != '' AND meta_value != 'a:0:{}'", $post_id ) );
+		return ( $has_sources == 0 && ! $this->is_item_fully_watched( $post_id, 'tv' ) );
 	}
 
 	public function sync_tvmaze_metadata( $post_id, $tvdb_id ) {
@@ -126,19 +140,15 @@ class TVM_Importer {
 		$lookup = $tvmaze->get_id_by_external( $tvdb_id );
 		if ( ! is_wp_error( $lookup ) && isset( $lookup['id'] ) ) {
 			$episodes = $tvmaze->get_episodes( $lookup['id'] );
-			foreach ( $episodes as $ep ) {
-				$this->upsert_episode( $post_id, $ep );
-			}
+			foreach ( $episodes as $ep ) { $this->upsert_episode( $post_id, $ep ); }
 		}
 	}
 
 	public function sync_watchmode_data( $post_id ) {
 		$imdb_id = get_post_meta( $post_id, '_tvm_imdb_id', true );
 		if ( ! $imdb_id ) return;
-		
 		$type = get_post_meta( $post_id, '_tvm_media_type', true );
 		$watchmode = new TVM_API_WATCHMODE();
-
 		if ( 'tv' === $type ) {
 			$wm_data = $watchmode->get_all_episodes_data( $imdb_id );
 			if ( ! is_wp_error( $wm_data ) ) {
@@ -155,7 +165,6 @@ class TVM_Importer {
 		global $wpdb;
 		$s = absint($ep['season']); $n = absint($ep['number']);
 		$id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} m1 JOIN {$wpdb->postmeta} m2 ON m1.post_id = m2.post_id WHERE m1.meta_key = '_tvm_parent_id' AND m1.meta_value = %d AND m2.meta_key = '_tvm_season' AND m2.meta_value = %d AND EXISTS (SELECT 1 FROM {$wpdb->postmeta} m3 WHERE m3.post_id = m1.post_id AND m3.meta_key = '_tvm_number' AND m3.meta_value = %d)", $parent_id, $s, $n ) );
-
 		if ( ! $id ) {
 			$id = wp_insert_post( array( 'post_title' => sprintf('S%02dE%02d - %s', $s, $n, $ep['name']), 'post_content' => $ep['summary'] ?? '', 'post_status' => 'publish', 'post_type' => 'tvm_episode' ) );
 		}
@@ -178,23 +187,6 @@ class TVM_Importer {
 		$exists = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM $table WHERE user_id = %d AND item_id = %d AND season_number = 0", get_current_user_id(), $post_id ) );
 		if ( ! $exists ) {
 			$wpdb->insert( $table, array( 'user_id' => get_current_user_id(), 'item_id' => $post_id, 'media_type' => $type, 'season_number' => 0, 'episode_number' => 0 ) );
-		}
-	}
-
-	private function needs_watchmode_sync( $post_id ) {
-		global $wpdb;
-		$has_sources = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_episode_sources' AND post_id IN (SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_parent_id' AND meta_value = %d) AND meta_value != '' AND meta_value != 'a:0:{}'", $post_id ) );
-		return ( $has_sources == 0 && ! $this->is_item_fully_watched( $post_id, 'tv' ) );
-	}
-
-	public function is_item_fully_watched( $post_id, $type ) {
-		global $wpdb;
-		$table = $wpdb->prefix . 'tvm_user_progress';
-		if ( 'movie' === $type ) {
-			return (bool) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM $table WHERE item_id = %d AND watched_at IS NOT NULL", $post_id ) );
-		} else {
-			$unwatched = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(p.ID) FROM {$wpdb->posts} p JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id' JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_air_date' LEFT JOIN $table prog ON p.ID = prog.episode_id WHERE m1.meta_value = %d AND m2.meta_value <= %s AND (prog.watched_at IS NULL OR prog.watched_at = '')", $post_id, current_time('Y-m-d') ) );
-			return ( $unwatched == 0 );
 		}
 	}
 }
