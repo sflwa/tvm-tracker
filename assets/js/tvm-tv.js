@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.1.9 - Settings Synchronization Fix
+ * Version: 1.2.0 - Future Episode Safety
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -107,7 +107,6 @@ jQuery(function($) {
         },
 
         loadEpisodes: function(id) {
-            // Pre-flight check: ensure settings are loaded before rendering episodes
             if (!window.tvm_settings_data || !window.tvm_settings_data.master_sources || window.tvm_settings_data.master_sources.length === 0) {
                 $.post(tvm_app.ajax_url, { action: 'tvm_get_settings', nonce: tvm_app.nonce }, (res) => {
                     if (res.success) {
@@ -126,7 +125,19 @@ jQuery(function($) {
                     let epHtml = '<div class="tvm-episode-list" style="display:flex; flex-direction:column; gap:12px;">';
                     res.data.forEach(ep => {
                         const statusColor = ep.is_watched ? '#46b450' : '#ddd';
-                        const sourceIcons = this.renderSources(ep.sources);
+                        
+                        // Step F Implementation: Logic for Future Episodes
+                        const sourceContent = ep.is_future 
+                            ? '<span style="font-size:10px; color:#2271b1; text-transform:uppercase; background:#e7f3ff; padding:4px 8px; border-radius:4px; font-weight:700;">Upcoming</span>'
+                            : this.renderSources(ep.sources);
+
+                        const watchAction = ep.is_future
+                            ? '<span class="dashicons dashicons-clock" style="color:#bbb; font-size:24px; width:24px; height:24px; cursor:default;" title="Available on air date"></span>'
+                            : `<span class="dashicons ${ep.is_watched ? 'dashicons-visibility' : 'dashicons-hidden'} tvm-ep-watch" 
+                                      data-id="${ep.id}" 
+                                      data-watched="${!ep.is_watched}" 
+                                      style="cursor:pointer; color:${statusColor}; font-size:24px; width:24px; height:24px;"></span>`;
+                        
                         let cleanTitle = ep.title.replace(/^S\d+E\d+\s-\s/i, '');
                         
                         epHtml += `
@@ -137,11 +148,8 @@ jQuery(function($) {
                                     <div style="font-size:12px; color:#999; margin-top:4px;">Air Date: ${ep.air_date || 'TBA'}</div>
                                 </div>
                                 <div style="display:flex; align-items:center; gap:15px;">
-                                    <div class="tvm-episode-sources" style="display:flex; gap:6px;">${sourceIcons}</div>
-                                    <span class="dashicons ${ep.is_watched ? 'dashicons-visibility' : 'dashicons-hidden'} tvm-ep-watch" 
-                                          data-id="${ep.id}" 
-                                          data-watched="${!ep.is_watched}" 
-                                          style="cursor:pointer; color:${statusColor}; font-size:24px; width:24px; height:24px;"></span>
+                                    <div class="tvm-episode-sources" style="display:flex; gap:6px;">${sourceContent}</div>
+                                    ${watchAction}
                                 </div>
                             </div>
                             <div class="tvm-ep-overview" style="margin-top:12px; font-size:13px; line-height:1.5; color:#666;">${ep.overview || 'No description available.'}</div>
