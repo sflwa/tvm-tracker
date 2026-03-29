@@ -1,7 +1,7 @@
 <?php
 /**
  * Frontend Shortcodes
- * Version 1.9.0 - Script Dependency & Order Fix
+ * Version 1.9.1 - Calendar Button Integration
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -97,6 +97,7 @@ class TVM_Shortcodes {
 							<button class="tvm-filter-btn" data-filter="watched">Watched</button>
 							<button class="tvm-filter-btn" data-filter="released">Unwatched</button>
 							<button class="tvm-filter-btn" data-filter="upcoming">Upcoming</button>
+							<button class="tvm-filter-btn tvm-calendar-toggle" data-filter="calendar">Calendar</button>
 						</div>
 						<div class="tvm-vault-controls" style="display: flex; align-items: center; gap: 15px;">
 							<label style="font-size: 12px; display: flex; align-items: center; gap: 5px; cursor: pointer; color: #666; font-weight: 600;">
