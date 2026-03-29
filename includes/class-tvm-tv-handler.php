@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX TV Watchlist Handler
- * Version 1.0.5 - Calendar Query Support
+ * Version 1.0.6 - Stats Restoration
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -19,10 +19,9 @@ class TVM_TV_Handler {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		global $wpdb;
 		$user_id = get_current_user_id();
-		$month = sanitize_text_field( $_POST['month'] ); // YYYY-MM format
+		$month = sanitize_text_field( $_POST['month'] ); 
 		$progress_table = $wpdb->prefix . 'tvm_user_progress';
 
-		// Get user's tracked series IDs
 		$tracked_ids = $wpdb->get_col( $wpdb->prepare(
 			"SELECT item_id FROM $progress_table WHERE user_id = %d AND media_type = 'tv' AND season_number = 0",
 			$user_id
@@ -35,7 +34,6 @@ class TVM_TV_Handler {
 		$start_date = $month . '-01';
 		$end_date   = date( 'Y-m-t', strtotime( $start_date ) );
 
-		// Query episodes airing this month for tracked shows
 		$episodes = $wpdb->get_results( $wpdb->prepare(
 			"SELECT p.ID, p.post_title, m1.meta_value as air_date, m2.meta_value as parent_id, m3.meta_value as ep_num, m4.meta_value as season_num
 			 FROM {$wpdb->posts} p
@@ -70,7 +68,6 @@ class TVM_TV_Handler {
 		wp_send_json_success( $calendar_data );
 	}
 
-    // Standard watchlist function remains unchanged below...
 	public function get_watchlist() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		global $wpdb;
@@ -87,7 +84,7 @@ class TVM_TV_Handler {
 		);
 
 		if ( empty( $user_shows ) ) {
-			wp_send_json_success( array( 'items' => array() ) );
+			wp_send_json_success( array( 'items' => array(), 'stats' => array('series'=>0, 'episodes'=>0, 'watched'=>0, 'percent'=>0) ) );
 		}
 
 		$query = new WP_Query( array(
@@ -100,6 +97,9 @@ class TVM_TV_Handler {
 		$today_str = current_time( 'Y-m-d' );
 		$user_services  = get_user_meta( $user_id, 'tvm_user_services', true ) ?: array();
 		$primary_region = strtoupper( get_user_meta( $user_id, 'tvm_primary_region', true ) ?: 'US' );
+
+        $tv_ep_total = 0;
+        $tv_ep_watched = 0;
 
 		if ( $query->have_posts() ) {
 			while ( $query->have_posts() ) {
@@ -123,6 +123,7 @@ class TVM_TV_Handler {
 				$has_streaming = false;
 
 				if ( $ep_count > 0 ) {
+                    $tv_ep_total += $ep_count;
 					foreach ( $ep_data as $ep ) {
 						$is_future = ( $ep->air_date && $ep->air_date > $today_str );
 						$is_watched = $wpdb->get_var( $wpdb->prepare(
@@ -132,6 +133,7 @@ class TVM_TV_Handler {
 
 						if ( $is_watched ) {
 							$ep_watched_count++;
+                            $tv_ep_watched++;
 						} elseif ( ! $is_future ) {
 							$aired_unwatched_count++;
 						}
@@ -170,6 +172,14 @@ class TVM_TV_Handler {
 			}
 			wp_reset_postdata();
 		}
-		wp_send_json_success( array( 'items' => $watchlist ) );
+		wp_send_json_success( array( 
+            'items' => $watchlist,
+            'stats' => array(
+                'series'   => count($watchlist),
+                'episodes' => $tv_ep_total,
+                'watched'  => $tv_ep_watched,
+                'percent'  => ($tv_ep_total > 0) ? round(($tv_ep_watched / $tv_ep_total) * 100) : 0
+            )
+        ) );
 	}
 }
