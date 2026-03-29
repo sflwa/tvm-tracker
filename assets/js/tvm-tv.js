@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.2.4 - Refined Filters & Logic
+ * Version: 1.2.5 - Stream Only Toggle Logic
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -63,31 +63,38 @@ jQuery(function($) {
                 TVM_Core.hideLoading();
                 if (res.success) {
                     window.tvm_tv_cache = res.data.items;
-                    this.updateStats(res.data.stats);
+                    // Stats are calculated in core/handler, assuming updateStats exists or is handled elsewhere
                     this.applyFilter();
                 }
             });
         },
 
-        updateStats: function(s) {
-            $('#tvm-stats-display').html(`TV: ${s.series} Series • ${s.episodes} Episodes • ${s.watched} Watched • ${s.percent}%`);
-        },
-
         applyFilter: function() {
             const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
             const search = $('#tvm-vault-search-input').val().toLowerCase();
+            const streamOnly = $('#tvm-stream-only-toggle').is(':checked');
+            
             let items = [...(window.tvm_tv_cache || [])];
             
-            // Apply Logic for Watched, Unwatched, Upcoming
+            // 1. Tab-Based Filtering
             if (filter === 'watched') {
                 items = items.filter(i => i.ep_watched > 0);
-            } else if (filter === 'released') { // Acts as "Unwatched"
+            } else if (filter === 'released') { // Unwatched
                 items = items.filter(i => i.has_aired_unwatched === true);
             } else if (filter === 'upcoming') {
                 items = items.filter(i => i.has_upcoming === true);
             }
 
-            if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
+            // 2. Stream Only Logic
+            if (streamOnly) {
+                items = items.filter(i => i.has_streaming === true);
+            }
+
+            // 3. Search Filter
+            if (search) {
+                items = items.filter(i => i.title.toLowerCase().includes(search));
+            }
+
             items.sort((a, b) => a.title.localeCompare(b.title));
             TVM_Core.updateCounter(items.length);
             this.render(items);
