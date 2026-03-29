@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX TV Watchlist Handler
- * Version 1.0.4 - Aired Unwatched Logic Fix
+ * Version 1.0.5 - Calendar Query Support
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -12,8 +12,65 @@ class TVM_TV_Handler {
 
 	public function __construct() {
 		add_action( 'wp_ajax_tvm_get_tv_watchlist', array( $this, 'get_watchlist' ) );
+		add_action( 'wp_ajax_tvm_get_calendar_month', array( $this, 'get_calendar_month' ) );
 	}
 
+	public function get_calendar_month() {
+		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
+		global $wpdb;
+		$user_id = get_current_user_id();
+		$month = sanitize_text_field( $_POST['month'] ); // YYYY-MM format
+		$progress_table = $wpdb->prefix . 'tvm_user_progress';
+
+		// Get user's tracked series IDs
+		$tracked_ids = $wpdb->get_col( $wpdb->prepare(
+			"SELECT item_id FROM $progress_table WHERE user_id = %d AND media_type = 'tv' AND season_number = 0",
+			$user_id
+		) );
+
+		if ( empty( $tracked_ids ) ) {
+			wp_send_json_success( array() );
+		}
+
+		$start_date = $month . '-01';
+		$end_date   = date( 'Y-m-t', strtotime( $start_date ) );
+
+		// Query episodes airing this month for tracked shows
+		$episodes = $wpdb->get_results( $wpdb->prepare(
+			"SELECT p.ID, p.post_title, m1.meta_value as air_date, m2.meta_value as parent_id, m3.meta_value as ep_num, m4.meta_value as season_num
+			 FROM {$wpdb->posts} p
+			 JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_air_date'
+			 JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_parent_id'
+			 JOIN {$wpdb->postmeta} m3 ON p.ID = m3.post_id AND m3.meta_key = '_tvm_number'
+			 JOIN {$wpdb->postmeta} m4 ON p.ID = m4.post_id AND m4.meta_key = '_tvm_season'
+			 WHERE p.post_type = 'tvm_episode'
+			 AND m1.meta_value BETWEEN %s AND %s
+			 AND m2.meta_value IN (" . implode( ',', array_map( 'intval', $tracked_ids ) ) . ")
+			 ORDER BY m1.meta_value ASC",
+			$start_date, $end_date
+		) );
+
+		$calendar_data = array();
+		foreach ( $episodes as $ep ) {
+			$is_watched = $wpdb->get_var( $wpdb->prepare(
+				"SELECT id FROM $progress_table WHERE user_id = %d AND episode_id = %d AND watched_at IS NOT NULL",
+				$user_id, $ep->ID
+			) );
+
+			$calendar_data[] = array(
+				'id'         => $ep->ID,
+				'series'     => get_the_title( $ep->parent_id ),
+				'title'      => $ep->post_title,
+				'air_date'   => $ep->air_date,
+				'display'    => $ep->season_num . 'x' . $ep->ep_num,
+				'is_watched' => (bool) $is_watched
+			);
+		}
+
+		wp_send_json_success( $calendar_data );
+	}
+
+    // Standard watchlist function remains unchanged below...
 	public function get_watchlist() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		global $wpdb;
@@ -30,7 +87,7 @@ class TVM_TV_Handler {
 		);
 
 		if ( empty( $user_shows ) ) {
-			wp_send_json_success( array( 'items' => array(), 'stats' => array() ) );
+			wp_send_json_success( array( 'items' => array() ) );
 		}
 
 		$query = new WP_Query( array(
@@ -76,7 +133,6 @@ class TVM_TV_Handler {
 						if ( $is_watched ) {
 							$ep_watched_count++;
 						} elseif ( ! $is_future ) {
-							// FIX: Only count episodes that have already aired
 							$aired_unwatched_count++;
 						}
 
