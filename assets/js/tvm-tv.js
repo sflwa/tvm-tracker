@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.2.5 - Stream Only Toggle Logic
+ * Version: 1.2.7 - Inline Unwatched Logic
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -14,7 +14,18 @@ jQuery(function($) {
                 if (window.current_media_type === 'tv') this.applyFilter();
             });
 
-            $(document).on('click', '.tvm-tv-trigger', (e) => this.showSeriesDetails($(e.currentTarget).data('id')));
+            // Trigger Series Details (Normal Drill Down)
+            $(document).on('click', '.tvm-tv-trigger', (e) => {
+                const filter = $('.tvm-filter-btn.active').data('filter');
+                if (filter === 'released') {
+                    // North Star Logic: Inline toggle instead of drill down
+                    $('.tvm-poster-wrapper').removeClass('tvm-unwatched-active');
+                    $(e.currentTarget).closest('.tvm-poster-wrapper').addClass('tvm-unwatched-active');
+                    this.showInlineEpisodes($(e.currentTarget).data('id'));
+                } else {
+                    this.showSeriesDetails($(e.currentTarget).data('id'));
+                }
+            });
 
             $(document).on('click', '#tvm-back-to-grid', (e) => {
                 e.preventDefault();
@@ -31,6 +42,18 @@ jQuery(function($) {
                 $(`#tvm-season-group-${seasonNum}`).show();
             });
 
+            $(document).on('click', '.tvm-mark-season-watched', async (e) => {
+                const $btn = $(e.currentTarget);
+                const unwatchedItems = $btn.closest('.tvm-season-content-group').find('.tvm-ep-watch[data-watched="true"]');
+                if (unwatchedItems.length === 0 || !confirm(`Mark ${unwatchedItems.length} episodes watched?`)) return;
+                $btn.prop('disabled', true).text('Processing...');
+                for (let i = 0; i < unwatchedItems.length; i++) {
+                    await $.post(tvm_app.ajax_url, { action: 'tvm_toggle_episode_watched', episode_id: $(unwatchedItems[i]).data('id'), watched: 'true', nonce: tvm_app.nonce });
+                }
+                this.load(); 
+                this.loadEpisodes($('#tvm-sync-episodes').data('id'), $('.tvm-season-tab.active').data('season'));
+            });
+
             $(document).on('click', '#tvm-sync-episodes', (e) => {
                 const $btn = $(e.currentTarget);
                 const id = $btn.data('id');
@@ -43,15 +66,9 @@ jQuery(function($) {
 
             $(document).on('click', '.tvm-ep-watch', (e) => {
                 const $btn = $(e.currentTarget);
-                const seriesId = $('#tvm-sync-episodes').data('id');
-                const activeSeason = $('.tvm-season-tab.active').data('season');
-                $.post(tvm_app.ajax_url, { 
-                    action: 'tvm_toggle_episode_watched', 
-                    episode_id: $btn.data('id'), 
-                    watched: $btn.data('watched'), 
-                    nonce: tvm_app.nonce 
-                }, () => {
-                    this.loadEpisodes(seriesId, activeSeason);
+                $.post(tvm_app.ajax_url, { action: 'tvm_toggle_episode_watched', episode_id: $btn.data('id'), watched: $btn.data('watched'), nonce: tvm_app.nonce }, () => {
+                    const seriesId = $('#tvm-sync-episodes').data('id') || $('.tvm-unwatched-active .tvm-tv-trigger').data('id');
+                    if (seriesId) this.loadEpisodes(seriesId, $('.tvm-season-tab.active').data('season'));
                     this.load();
                 });
             });
@@ -63,7 +80,6 @@ jQuery(function($) {
                 TVM_Core.hideLoading();
                 if (res.success) {
                     window.tvm_tv_cache = res.data.items;
-                    // Stats are calculated in core/handler, assuming updateStats exists or is handled elsewhere
                     this.applyFilter();
                 }
             });
@@ -73,48 +89,59 @@ jQuery(function($) {
             const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
             const search = $('#tvm-vault-search-input').val().toLowerCase();
             const streamOnly = $('#tvm-stream-only-toggle').is(':checked');
-            
             let items = [...(window.tvm_tv_cache || [])];
             
-            // 1. Tab-Based Filtering
-            if (filter === 'watched') {
-                items = items.filter(i => i.ep_watched > 0);
-            } else if (filter === 'released') { // Unwatched
-                items = items.filter(i => i.has_aired_unwatched === true);
-            } else if (filter === 'upcoming') {
-                items = items.filter(i => i.has_upcoming === true);
-            }
+            if (filter === 'watched') items = items.filter(i => i.ep_watched > 0);
+            else if (filter === 'released') items = items.filter(i => i.has_aired_unwatched === true);
+            else if (filter === 'upcoming') items = items.filter(i => i.has_upcoming === true);
 
-            // 2. Stream Only Logic
-            if (streamOnly) {
-                items = items.filter(i => i.has_streaming === true);
-            }
-
-            // 3. Search Filter
-            if (search) {
-                items = items.filter(i => i.title.toLowerCase().includes(search));
-            }
+            if (streamOnly) items = items.filter(i => i.has_streaming === true);
+            if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
 
             items.sort((a, b) => a.title.localeCompare(b.title));
             TVM_Core.updateCounter(items.length);
-            this.render(items);
+
+            // Clean inline area when filter changes
+            $('#tvm-inline-episodes').remove();
+            this.render(items, filter === 'released');
         },
 
-        render: function(items) {
-            let html = '';
+        render: function(items, isUnwatchedView) {
+            const gridClass = isUnwatchedView ? 'tvm-grid-12' : 'tvm-locked-grid';
+            let html = `<div class="${gridClass}">`;
+            
             items.forEach(item => {
+                const badge = isUnwatchedView ? `<div class="tvm-badge-stats">${item.ep_count - item.ep_watched}</div>` : `<div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>`;
                 html += `
                 <div class="tvm-movie-card">
                     <div class="tvm-poster-wrapper">
-                        <div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>
+                        ${badge}
                         <div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;">
                             <img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">
                         </div>
                     </div>
-                    <h5 style="margin:8px 0; font-size:11px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>
+                    ${isUnwatchedView ? '' : `<h5 style="margin:8px 0; font-size:11px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>`}
                 </div>`;
             });
+            html += `</div>`;
+            
+            // Container for unwatched episodes below the 12-col grid
+            if (isUnwatchedView) html += `<div id="tvm-inline-episodes" style="margin-top:20px;"></div>`;
+
             $('#tvm-watchlist-grid').html(html || '<p style="grid-column:1/-1; text-align:center; padding:40px;">No series found.</p>');
+        },
+
+        showInlineEpisodes: function(id) {
+            const item = window.tvm_tv_cache.find(i => i.id == id);
+            $('#tvm-inline-episodes').html(`
+                <div style="border-top:2px solid #eee; padding-top:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                         <h3 style="margin:0;">${item.title} - Unwatched</h3>
+                    </div>
+                    <div id="tvm-episode-results">Loading...</div>
+                </div>
+            `);
+            this.loadEpisodes(id);
         },
 
         showSeriesDetails: function(id) {
@@ -136,26 +163,21 @@ jQuery(function($) {
         },
 
         loadEpisodes: function(id, restoreSeason = null) {
-            if (!window.tvm_settings_data || !window.tvm_settings_data.master_sources || window.tvm_settings_data.master_sources.length === 0) {
-                $.post(tvm_app.ajax_url, { action: 'tvm_get_settings', nonce: tvm_app.nonce }, (res) => {
-                    if (res.success) {
-                        window.tvm_settings_data = res.data.raw;
-                        this.fetchEpisodeData(id, restoreSeason);
-                    }
-                });
-            } else {
-                this.fetchEpisodeData(id, restoreSeason);
-            }
-        },
-
-        fetchEpisodeData: function(id, restoreSeason) {
             $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_episodes', post_id: id, nonce: tvm_app.nonce }, (res) => {
                 if (res.success) {
+                    const filter = $('.tvm-filter-btn.active').data('filter');
+                    // If unwatched filter is active, only show unwatched episodes
+                    let episodes = res.data;
+                    if (filter === 'released') {
+                        episodes = episodes.filter(ep => !ep.is_watched && !ep.is_future);
+                    }
+
                     const grouped = {};
-                    res.data.forEach(ep => {
+                    episodes.forEach(ep => {
                         if (!grouped[ep.season]) grouped[ep.season] = [];
                         grouped[ep.season].push(ep);
                     });
+
                     const seasons = Object.keys(grouped).sort((a, b) => a - b);
                     let navHtml = '';
                     let contentHtml = '';
@@ -164,6 +186,7 @@ jQuery(function($) {
                         const tabStyle = isActive ? 'background:#2271b1; color:#fff; font-weight:700;' : 'background:#f5f5f5; color:#666; font-weight:600;';
                         navHtml += `<button class="tvm-season-tab ${isActive ? 'active' : ''}" data-season="${sNum}" style="border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; transition:0.2s; ${tabStyle}">Season ${sNum}</button>`;
                         contentHtml += `<div id="tvm-season-group-${sNum}" class="tvm-season-content-group" style="display:${isActive ? 'flex' : 'none'}; flex-direction:column; gap:12px;">`;
+                        
                         grouped[sNum].forEach(ep => {
                             const statusColor = ep.is_watched ? '#46b450' : '#ddd';
                             const sourceContent = ep.is_future ? '<span style="font-size:10px; color:#2271b1; text-transform:uppercase; background:#e7f3ff; padding:4px 8px; border-radius:4px; font-weight:700;">Upcoming</span>' : this.renderSources(ep.sources);
@@ -174,7 +197,7 @@ jQuery(function($) {
                                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                                     <div style="flex:1;">
                                         <div style="font-weight:800; color:#1d2327; font-size:16px;">E${ep.number} - ${cleanTitle}</div>
-                                        <div style="font-size:12px; color:#999; margin-top:4px;">Air Date: ${ep.air_date || 'TBA'}</div>
+                                        <div style="font-size:12px; color:#999; margin-top:4px;">Air Date: ${ep.air_date}</div>
                                     </div>
                                     <div style="display:flex; align-items:center; gap:15px;">
                                         <div class="tvm-episode-sources" style="display:flex; gap:6px;">${sourceContent}</div>
@@ -186,7 +209,13 @@ jQuery(function($) {
                         });
                         contentHtml += `</div>`;
                     });
-                    $('#tvm-season-nav').html(navHtml);
+                    
+                    // For inline unwatched view, we hide the season nav if only 1 season has unwatched eps
+                    if (filter === 'released') {
+                        $('#tvm-season-nav').html(seasons.length > 1 ? navHtml : '');
+                    } else {
+                        $('#tvm-season-nav').html(navHtml);
+                    }
                     $('#tvm-episode-results').html(contentHtml);
                 }
             });
