@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.4.7 - Calendar Logic Fix
+ * Version: 1.5.7 - Kill Recursion Loop & Listen for Ready Event
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -14,8 +14,15 @@ jQuery(function($) {
                 else if (window.location.hash === '#tv-calendar') this.switchToFilter('calendar');
             }, 200);
 
+            // Re-render when core settings are loaded
+            $(document).on('tvm_settings_ready', () => {
+                if ($('#tvm-episode-results').is(':visible')) {
+                    const seriesId = $('#tvm-sync-episodes').data('id') || $('#tvm-unwatched-dropdown').val();
+                    if (seriesId) this.loadEpisodes(seriesId, $('.tvm-season-tab.active').data('season'));
+                }
+            });
+
             $(document).on('tvm_tab_switch', (e, tab) => {
-                // BUG FIX: Ensure we only load TV data if we are actually on the TV media type
                 if (tab === 'watchlist' && window.current_media_type === 'tv') {
                     const currentFilter = $('.tvm-filter-btn.active').data('filter');
                     if (currentFilter === 'calendar') {
@@ -164,7 +171,10 @@ jQuery(function($) {
             else if (filter === 'released') items = items.filter(i => i.has_aired_unwatched === true);
             else if (filter === 'upcoming') items = items.filter(i => i.has_upcoming === true);
 
-            if (streamOnly) items = items.filter(i => i.has_streaming === true);
+            if (streamOnly) {
+                items = items.filter(i => i.has_streaming === true);
+            }
+            
             if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
 
             items.sort((a, b) => a.title.localeCompare(b.title));
@@ -302,17 +312,30 @@ jQuery(function($) {
         },
         renderSources: function(sources) {
             if (!sources || !Array.isArray(sources) || sources.length === 0) return '<span style="font-size:10px; color:#999; text-transform:uppercase; background:#f5f5f5; padding:4px 8px; border-radius:4px; font-weight:700;">No Sources</span>';
+            
             const sdata = window.tvm_settings_data || {};
-            const userv = sdata.user_services || [];
-            const preg = (sdata.primary_region || 'US').toUpperCase();
+            const userv = (sdata.user_services || []).map(Number);
+            const preg = (sdata.primary_region || 'US').toString().trim().toUpperCase();
             const mlist = sdata.master_sources || [];
+            
+            if (userv.length === 0 && mlist.length === 0) {
+                return `<span style="font-size:10px; color:#999; font-style:italic;">Loading sources...</span>`;
+            }
+
             let html = '', count = 0;
             sources.forEach(s => {
-                if (['rent', 'buy', 'purchase'].includes(s.type)) return;
-                if (userv.includes(parseInt(s.source_id))) {
-                    if (s.type === 'free' || (s.type === 'sub' && s.region.toUpperCase() === preg)) {
-                        const m = mlist.find(master => master.id == s.source_id);
-                        if (m && m.logo_100px) { html += `<img src="${m.logo_100px}" title="${s.name}" style="width:48px; height:48px; border-radius:6px; border:1px solid #eee; object-fit:contain;">`; count++; }
+                const sid = Number(s.source_id);
+                const sType = (s.type || '').toString().trim().toLowerCase();
+                const sRegion = (s.region || '').toString().trim().toUpperCase();
+
+                if (['rent', 'buy', 'purchase'].includes(sType)) return;
+                if (!userv.includes(sid)) return;
+
+                if (sType === 'free' || (sType === 'sub' && sRegion === preg)) {
+                    const m = mlist.find(master => Number(master.id) === sid);
+                    if (m && m.logo_100px) { 
+                        html += `<img src="${m.logo_100px}" title="${s.name}" style="width:48px; height:48px; border-radius:6px; border:1px solid #eee; object-fit:contain;">`; 
+                        count++; 
                     }
                 }
             });
