@@ -1,46 +1,66 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version 1.1.1 - UI Rendering Fix
+ * Version 1.1.3 - Rule 2 Compliance Fix
  */
 jQuery(function($) {
     const TVModule = {
         init: function() {
             $(document).on('tvm_tab_switch', (e, tab) => {
-                if (tab === 'watchlist' && window.current_media_type === 'tv') this.load();
+                if (tab === 'watchlist' && window.current_media_type === 'tv') {
+                    this.load();
+                }
             });
             $(document).on('tvm_filter_change', () => {
                 if (window.current_media_type === 'tv') this.applyFilter();
             });
-            $(document).on('click', '.tvm-tv-trigger', (e) => this.showSeriesDetails($(e.currentTarget).data('id')));
+            $(document).on('click', '.tvm-tv-trigger', (e) => {
+                this.showSeriesDetails($(e.currentTarget).data('id'));
+            });
 
+            // Sync Action
             $(document).on('click', '#tvm-sync-episodes', (e) => {
                 const $btn = $(e.currentTarget);
                 const id = $btn.data('id');
                 $btn.prop('disabled', true).text('Syncing...');
-                $.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: id, nonce: tvm_app.nonce }, (res) => {
+                
+                $.post(tvm_app.ajax_url, { 
+                    action: 'tvm_sync_series', 
+                    post_id: id, 
+                    nonce: tvm_app.nonce 
+                }, (res) => {
                     $btn.prop('disabled', false).text('Sync Episodes');
-                    if (res.success) { alert(res.data); this.loadEpisodes(id); }
+                    if (res.success) {
+                        alert(res.data);
+                        this.loadEpisodes(id); 
+                    }
                 });
             });
 
+            // Watch Toggle
             $(document).on('click', '.tvm-ep-watch', (e) => {
                 const $btn = $(e.currentTarget);
+                const epId = $btn.data('id');
+                const watched = $btn.data('watched');
+                
                 $.post(tvm_app.ajax_url, { 
                     action: 'tvm_toggle_episode_watched', 
-                    episode_id: $btn.data('id'), 
-                    watched: $btn.data('watched'), 
+                    episode_id: epId, 
+                    watched: watched, 
                     nonce: tvm_app.nonce 
                 }, () => {
                     const seriesId = $('#tvm-sync-episodes').data('id');
                     this.loadEpisodes(seriesId);
-                    this.load();
+                    this.load(); 
                 });
             });
         },
 
         load: function() {
             TVM_Core.showLoading();
-            $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_watchlist', nonce: tvm_app.nonce }, (res) => {
+            $.post(tvm_app.ajax_url, { 
+                action: 'tvm_get_tv_watchlist', 
+                nonce: tvm_app.nonce 
+            }, (res) => {
                 TVM_Core.hideLoading();
                 if (res.success) {
                     window.tvm_tv_cache = res.data.items;
@@ -51,18 +71,22 @@ jQuery(function($) {
         },
 
         updateStats: function(s) {
-            $('#tvm-stats-display').html(`TV: ${s.series} Series • ${s.episodes} Episodes • ${s.watched} Watched • ${s.percent}%`);
+            const html = `TV: ${s.series} Series • ${s.episodes} Episodes • ${s.watched} Watched • ${s.percent}%`;
+            $('#tvm-stats-display').html(html);
         },
 
         applyFilter: function() {
             const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
             const search = $('#tvm-vault-search-input').val().toLowerCase();
             let items = [...(window.tvm_tv_cache || [])];
+
             if (filter === 'watched') items = items.filter(i => i.is_watched);
             else if (filter === 'released') items = items.filter(i => i.ep_watched < i.ep_count);
             else if (filter === 'upcoming') items = items.filter(i => i.has_upcoming);
+
             if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
             items.sort((a, b) => a.title.localeCompare(b.title));
+
             TVM_Core.updateCounter(items.length);
             this.render(items);
         },
@@ -70,10 +94,11 @@ jQuery(function($) {
         render: function(items) {
             let html = '';
             items.forEach(item => {
+                const statBadge = `<div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>`;
                 html += `
                 <div class="tvm-movie-card">
                     <div class="tvm-poster-wrapper">
-                        <div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>
+                        ${statBadge}
                         <div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;">
                             <img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">
                         </div>
@@ -101,27 +126,29 @@ jQuery(function($) {
         loadEpisodes: function(id) {
             $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_episodes', post_id: id, nonce: tvm_app.nonce }, (res) => {
                 if (res.success) {
-                    let epHtml = '<div class="tvm-episode-list" style="display:flex; flex-direction:column; gap:15px;">';
+                    let epHtml = '<div class="tvm-episode-list" style="display:flex; flex-direction:column; gap:10px;">';
                     res.data.forEach(ep => {
                         const statusColor = ep.is_watched ? '#46b450' : '#ddd';
                         const sourceIcons = this.renderSources(ep.sources);
                         
+                        // PRESERVING ORIGINAL STRUCTURE FROM YOUR SCREENSHOT
                         epHtml += `
-                        <div class="tvm-episode-row" style="padding:20px; background:#fff; border:1px solid #eee; border-radius:12px; border-left:5px solid ${statusColor};">
-                            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-                                <div style="flex:1;">
-                                    <div style="font-weight:800; color:#1d2327; font-size:16px;">S${ep.season} E${ep.number} - ${ep.title}</div>
-                                    <div style="font-size:12px; color:#999; margin-top:4px;">Air Date: ${ep.air_date || 'TBA'}</div>
+                        <div class="tvm-episode-row" style="display:flex; flex-direction:column; padding:15px; background:#f9f9f9; border-radius:8px; border-left:4px solid ${statusColor};">
+                            <div style="display:flex; align-items:center; justify-content:space-between;">
+                                <div>
+                                    <strong>S${ep.season} E${ep.number}</strong> 
+                                    <span style="margin-left:10px; font-weight:600;">${ep.title}</span>
+                                    <div style="font-size:11px; color:#999; margin-top:3px;">Air Date: ${ep.air_date || 'TBA'}</div>
                                 </div>
-                                <div style="display:flex; align-items:center; gap:15px;">
-                                    <div class="tvm-episode-sources" style="display:flex; gap:6px;">${sourceIcons}</div>
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <div class="tvm-episode-sources" style="display:flex; gap:5px;">${sourceIcons}</div>
                                     <span class="dashicons ${ep.is_watched ? 'dashicons-visibility' : 'dashicons-hidden'} tvm-ep-watch" 
                                           data-id="${ep.id}" 
                                           data-watched="${!ep.is_watched}" 
-                                          style="cursor:pointer; color:${statusColor}; font-size:24px; width:24px; height:24px;"></span>
+                                          style="cursor:pointer; color:${statusColor};"></span>
                                 </div>
                             </div>
-                            <div style="font-size:13px; line-height:1.5; color:#666;">${ep.overview || 'No description available.'}</div>
+                            <div style="margin-top:10px; font-size:12px; color:#666; line-height:1.4;">${ep.overview || 'No description available.'}</div>
                         </div>`;
                     });
                     $('#tvm-episode-results').html(epHtml + '</div>');
@@ -131,8 +158,10 @@ jQuery(function($) {
 
         renderSources: function(sources) {
             if (!sources || !Array.isArray(sources)) return '';
-            const userServices = window.tvm_settings_data.user_services || [];
-            const primaryRegion = (window.tvm_settings_data.primary_region || 'US').toUpperCase();
+            const settings = window.tvm_settings_data || {};
+            const userServices = settings.user_services || [];
+            const primaryRegion = (settings.primary_region || 'US').toUpperCase();
+            const masterList = settings.master_sources || [];
             let html = '';
 
             sources.forEach(s => {
@@ -140,9 +169,9 @@ jQuery(function($) {
                 if (['rent', 'buy', 'purchase'].includes(s.type)) return;
                 if (userServices.includes(sid)) {
                     if (s.type === 'free' || (s.type === 'sub' && s.region.toUpperCase() === primaryRegion)) {
-                        const master = window.tvm_settings_data.master_sources.find(m => m.id == sid);
+                        const master = masterList.find(m => m.id == sid);
                         if (master && master.logo_100px) {
-                            html += `<img src="${master.logo_100px}" title="${s.name}" style="width:28px; height:28px; border-radius:4px; border:1px solid #eee; object-fit:contain;">`;
+                            html += `<img src="${master.logo_100px}" title="${s.name}" style="width:24px; height:24px; border-radius:4px; object-fit:contain; border:1px solid #eee;">`;
                         }
                     }
                 }
