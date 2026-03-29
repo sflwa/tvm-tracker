@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX Movie Details Handler
- * Version 1.0.2 - On-Demand Sync for Watched Movies (Preserved Structure)
+ * Version 1.0.3 - Fix Undefined Method Error
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -21,15 +21,16 @@ class TVM_Movie_Details {
 
 		$user_id = get_current_user_id();
 
-		// LOGIC: If watched & last sync was > 30 days ago, trigger silent on-demand sync
+		// LOGIC: If watched & synced > 30 days ago, trigger on-demand sync
 		$last_sync = get_post_meta( $post_id, '_tvm_last_sync', true );
 		$is_watched = $this->is_watched( $user_id, $post_id );
 
 		if ( $is_watched && ( ! $last_sync || strtotime( $last_sync ) < strtotime( '-30 days' ) ) ) {
-			// Trigger the watchmode sync logic from the importer
 			if ( class_exists( 'TVM_Importer' ) ) {
 				$importer = new TVM_Importer();
-				$importer->handle_sync_logic( $post_id );
+				$imdb_id = get_post_meta( $post_id, '_tvm_imdb_id', true );
+				// FIX: Call correct public method
+				$importer->sync_watchmode_data( $post_id, $imdb_id );
 			}
 		}
 
@@ -52,17 +53,14 @@ class TVM_Movie_Details {
 			$source_type = isset( $source_map[$provider_id] ) ? $source_map[$provider_id]['type'] : 'sub';
 			$region      = isset( $source['region'] ) ? strtoupper( $source['region'] ) : '';
 
-			// Rule 3: No Rental or Buy
 			if ( in_array($source_type, array('rent', 'buy', 'purchase')) ) continue;
 
-			// Rule 1: Paid (sub) - Only Primary Region
 			if ( $source_type === 'sub' ) {
 				if ( ! in_array( $provider_id, $user_services ) ) continue;
 				if ( $region !== strtoupper($primary_region) ) continue;
 				$streaming[$provider_id . '_' . $region] = $source;
 			} 
 			
-			// Rule 2: Free - Any Region
 			if ( $source_type === 'free' ) {
 				if ( ! in_array( $provider_id, $user_services ) ) continue;
 				$streaming[$provider_id . '_' . $region] = $source;
