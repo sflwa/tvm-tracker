@@ -1,9 +1,9 @@
 /**
  * TV & Movie Tracker - Core Orchestrator
- * Version 1.9.9 - Filter Argument Fix
+ * Version 2.0.0 - Fix Stream Toggle Media Reset
  */
 jQuery(function($) {
-    window.TVM_Core = {
+    window.TV_Core = {
         updateCounter: function(count) {
             if (!$('#tvm-results-count').length) {
                 $('.tvm-vault-controls').prepend(`<span id="tvm-results-count" style="font-size:11px; font-weight:700; color:#2271b1; background:#e7f3ff; padding:2px 8px; border-radius:10px; margin-right:5px;">${count} shown</span>`);
@@ -59,15 +59,22 @@ jQuery(function($) {
     });
 
     $(document).on('input', '#tvm-vault-search-input', () => $(document).trigger('tvm_filter_change'));
-    $(document).on('change', '#tvm-stream-only-toggle', () => $(document).trigger('tvm_filter_change'));
+    
+    // FIX: Maintain current media type context when toggling stream-only filter
+    $(document).on('change', '#tvm-stream-only-toggle', function() {
+        const currentFilter = $('.tvm-filter-btn.active').data('filter') || 'all';
+        $(document).trigger('tvm_filter_change', [currentFilter]);
+    });
 
     const closeModal = () => $('#tvm-details-modal').hide();
     $('#tvm-close-modal').on('click', closeModal);
     $(document).on('click', '#tvm-details-modal', function(e) { if (e.target === this) closeModal(); });
     $(document).on('keydown', e => { if (e.key === "Escape") closeModal(); });
 
-    // STARTUP ROUTE
-    window.current_media_type = 'tv';
+    // STARTUP ROUTE - Preserve current media type if already set
+    if (!window.current_media_type) {
+        window.current_media_type = 'tv';
+    }
     
     $(window).on('load', function() {
         setTimeout(() => {
