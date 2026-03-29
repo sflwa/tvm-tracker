@@ -1,9 +1,10 @@
 <?php
 /**
  * Post Type Registration & Admin UI Columns
+ * Version 1.0.3 - Enhanced Admin Filtering
  *
  * @package TV_Movie_Tracker
- * @version 1.0.2
+ * @version 1.0.3
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -43,6 +44,63 @@ class TVM_CPT {
 		add_filter( 'manage_tvm_episode_posts_columns', array( $this, 'add_episode_columns' ) );
 		add_action( 'manage_tvm_episode_posts_custom_column', array( $this, 'render_episode_columns' ), 10, 2 );
 		add_filter( 'manage_edit-tvm_episode_sortable_columns', array( $this, 'make_columns_sortable' ) );
+
+		// Hook: Admin Filters
+		add_action( 'restrict_manage_posts', array( $this, 'add_episode_filters' ) );
+		add_action( 'parse_query', array( $this, 'filter_episodes_by_parent' ) );
+	}
+
+	/**
+	 * Adds a dropdown to filter episodes by their Parent Show
+	 */
+	public function add_episode_filters( $post_type ) {
+		if ( 'tvm_episode' !== $post_type ) {
+			return;
+		}
+
+		$parent_id = isset( $_GET['tvm_parent_filter'] ) ? absint( $_GET['tvm_parent_filter'] ) : 0;
+
+		// Get all TV shows to populate the filter dropdown
+		$shows = get_posts( array(
+			'post_type'      => 'tvm_item',
+			'posts_per_page' => -1,
+			'meta_key'       => '_tvm_media_type',
+			'meta_value'     => 'tv',
+			'orderby'        => 'title',
+			'order'          => 'ASC',
+		) );
+
+		echo '<select name="tvm_parent_filter">';
+		echo '<option value="">' . __( 'All Shows', 'tvm-tracker' ) . '</option>';
+		foreach ( $shows as $show ) {
+			printf(
+				'<option value="%d" %s>%s</option>',
+				$show->ID,
+				selected( $parent_id, $show->ID, false ),
+				get_the_title( $show->ID )
+			);
+		}
+		echo '</select>';
+	}
+
+	/**
+	 * Modifies the admin query to respect the parent show filter
+	 */
+	public function filter_episodes_by_parent( $query ) {
+		global $pagenow;
+		if ( ! is_admin() || 'edit.php' !== $pagenow || ! $query->is_main_query() ) {
+			return;
+		}
+
+		if ( 'tvm_episode' === $query->get( 'post_type' ) && ! empty( $_GET['tvm_parent_filter'] ) ) {
+			$query->set( 'meta_query', array(
+				array(
+					'key'     => '_tvm_parent_id',
+					'value'   => absint( $_GET['tvm_parent_filter'] ),
+					'compare' => '=',
+				),
+			) );
+		}
 	}
 
 	/**
@@ -54,7 +112,7 @@ class TVM_CPT {
 			'title'    => $columns['title'],
 			'parent'   => __( 'Parent Show', 'tvm-tracker' ),
 			'air_date' => __( 'Air Date', 'tvm-tracker' ),
-			'date'     => $columns['date'], // Keep original date column at end
+			'date'     => $columns['date'], 
 		);
 		return $new_columns;
 	}
@@ -92,10 +150,11 @@ class TVM_CPT {
 	}
 
 	/**
-	 * Make the Air Date column sortable.
+	 * Make the Air Date and Parent column sortable.
 	 */
 	public function make_columns_sortable( $columns ) {
 		$columns['air_date'] = 'air_date';
+		$columns['parent']   = 'parent';
 		return $columns;
 	}
 
@@ -110,7 +169,7 @@ class TVM_CPT {
 		if ( 'tvm_episode' === $query->get( 'post_type' ) ) {
 			if ( ! isset( $_GET['orderby'] ) ) {
 				$query->set( 'orderby', 'title' );
-				$query->set( 'order', 'ASC' );
+				$query->set( 'order'  , 'ASC' );
 			}
 		}
 	}
