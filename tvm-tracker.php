@@ -74,6 +74,15 @@ final class TVM_Tracker {
         require_once TVM_PATH . 'includes/class-tvm-movie-details.php';
         require_once TVM_PATH . 'includes/class-tvm-tv-handler.php';
         require_once TVM_PATH . 'includes/class-tvm-tv-details.php';
+
+
+        require_once TVM_PATH . 'includes/class-tvm-cpt.php';
+		require_once TVM_PATH . 'includes/class-admin-search.php';
+		require_once TVM_PATH . 'includes/class-admin-metaboxes.php';
+		
+
+
+		
 	}
 
 	public function register_post_types() {
