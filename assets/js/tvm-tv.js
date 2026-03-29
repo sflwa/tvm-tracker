@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.3.6 - Dropdown Unwatched Strategy
+ * Version: 1.3.7 - Dropdown Navigation Arrows
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -14,16 +14,32 @@ jQuery(function($) {
                 if (window.current_media_type === 'tv') this.applyFilter();
             });
 
-            // Standard Drill Down (for All/Watched/Upcoming)
             $(document).on('click', '.tvm-tv-trigger', (e) => {
                 this.showSeriesDetails($(e.currentTarget).data('id'));
             });
 
-            // Dropdown Trigger (for Unwatched)
+            // NORTH STAR: Dropdown Change Handler
             $(document).on('change', '#tvm-unwatched-dropdown', (e) => {
                 const id = $(e.target).val();
                 if (id) this.showInlineEpisodes(id);
                 else $('#tvm-unwatched-inline-container').hide();
+            });
+
+            // NORTH STAR: Previous/Next Navigation Arrows
+            $(document).on('click', '.tvm-dropdown-nav', (e) => {
+                const direction = $(e.currentTarget).data('dir');
+                const $dropdown = $('#tvm-unwatched-dropdown');
+                const currentIndex = $dropdown.prop('selectedIndex');
+                const totalOptions = $dropdown.find('option').length;
+
+                let nextIndex;
+                if (direction === 'next') {
+                    nextIndex = (currentIndex >= totalOptions - 1) ? 1 : currentIndex + 1;
+                } else {
+                    nextIndex = (currentIndex <= 1) ? totalOptions - 1 : currentIndex - 1;
+                }
+
+                $dropdown.prop('selectedIndex', nextIndex).trigger('change');
             });
 
             $(document).on('click', '#tvm-back-to-grid', (e) => {
@@ -45,10 +61,12 @@ jQuery(function($) {
                 const $btn = $(e.currentTarget);
                 const unwatchedItems = $btn.closest('.tvm-season-content-group').find('.tvm-ep-watch[data-watched="true"]');
                 if (unwatchedItems.length === 0 || !confirm(`Mark ${unwatchedItems.length} episodes watched?`)) return;
+                
                 $btn.prop('disabled', true).text('Processing...');
                 for (let i = 0; i < unwatchedItems.length; i++) {
                     await $.post(tvm_app.ajax_url, { action: 'tvm_toggle_episode_watched', episode_id: $(unwatchedItems[i]).data('id'), watched: 'true', nonce: tvm_app.nonce });
                 }
+                
                 this.load(); 
                 const seriesId = $('#tvm-sync-episodes').data('id') || $('#tvm-unwatched-dropdown').val();
                 this.loadEpisodes(seriesId, $('.tvm-season-tab.active').data('season'));
@@ -108,20 +126,21 @@ jQuery(function($) {
             let html = '';
             
             if (isUnwatchedView) {
-                // NORTH STAR: Dropdown for Unwatched episodes
+                // UI: Dropdown with Navigation Arrows
                 html += `
-                <div style="background:#fff; padding:30px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;">
-                    <label style="display:block; font-weight:700; margin-bottom:10px; color:#1d2327;">Select Show to View Unwatched Episodes:</label>
-                    <select id="tvm-unwatched-dropdown" style="width:100%; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd;">
-                        <option value="">-- Choose a Series (${items.length}) --</option>
-                        ${items.map(i => `<option value="${i.id}">(${i.ep_count - i.ep_watched}) ${i.title}</option>`).join('')}
-                    </select>
-                    <div id="tvm-unwatched-inline-container" style="display:none; margin-top:30px;"></div>
+                <div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span>
+                        <select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;">
+                            <option value="">-- Choose a Series (${items.length}) --</option>
+                            ${items.map(i => `<option value="${i.id}">(${i.ep_count - i.ep_watched}) ${i.title}</option>`).join('')}
+                        </select>
+                        <span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span>
+                    </div>
+                    <div id="tvm-unwatched-inline-container" style="display:none; margin-top:20px;"></div>
                 </div>`;
-                // Use .html() but DO NOT apply .tvm-locked-grid to the container for this view
                 $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(html);
             } else {
-                // Restore standard 6-column grid for All/Watched/Upcoming
                 html = items.map(item => `
                     <div class="tvm-movie-card">
                         <div class="tvm-poster-wrapper">
@@ -139,8 +158,9 @@ jQuery(function($) {
 
         showInlineEpisodes: function(id) {
             const item = window.tvm_tv_cache.find(i => i.id == id);
+            // Removed border-top per request
             $('#tvm-unwatched-inline-container').show().html(`
-                <div style="border-top:2px solid #eee; padding-top:20px;">
+                <div style="padding-top:10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                          <h3 style="margin:0;">${item.title}</h3>
                          <span style="font-size:12px; color:#999; font-style:italic;">Last Sync: ${item.last_sync}</span>
@@ -194,9 +214,10 @@ jQuery(function($) {
                         navHtml += `<button class="tvm-season-tab ${isActive ? 'active' : ''}" data-season="${sNum}" style="border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; transition:0.2s; ${tabStyle}">Season ${sNum}</button>`;
                         contentHtml += `<div id="tvm-season-group-${sNum}" class="tvm-season-content-group" style="display:${isActive ? 'flex' : 'none'}; flex-direction:column; gap:12px;">`;
                         
+                        // Updated button color to white/primary background
                         contentHtml += `
                             <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-                                <button class="tvm-mark-season-watched button button-small" style="font-size:10px; font-weight:700; color:#2271b1; border-color:#2271b1;">Mark Full Season Watched</button>
+                                <button class="tvm-mark-season-watched button button-primary button-small" style="font-size:10px; font-weight:700;">Mark Full Season Watched</button>
                             </div>`;
 
                         grouped[sNum].forEach(ep => {
