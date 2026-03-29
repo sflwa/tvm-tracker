@@ -1,10 +1,10 @@
 <?php
 /**
  * AJAX TV Details Handler
- * Version 1.1.2 - Enhanced Source Serialization Fix
+ * Version 1.1.3 - Human Readable Dates
  *
  * @package TV_Movie_Tracker
- * @version 1.1.2
+ * @version 1.1.3
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -40,9 +40,11 @@ class TVM_TV_Details {
 		$today = current_time('Y-m-d');
 		foreach ( $episodes as $ep ) {
 			$ep_id = $ep->ID;
-			$air_date = get_post_meta( $ep_id, '_tvm_air_date', true );
+			$air_date_raw = get_post_meta( $ep_id, '_tvm_air_date', true );
 			
-			// Ensure we are getting the array and not a serialized string
+			// Human Readable Date Formatting
+			$formatted_date = $air_date_raw ? date( 'M j, Y', strtotime( $air_date_raw ) ) : 'TBA';
+
 			$sources = get_post_meta( $ep_id, '_tvm_episode_sources', true );
 			if ( ! is_array( $sources ) ) {
 				$sources = array();
@@ -54,9 +56,9 @@ class TVM_TV_Details {
 				'overview'   => $ep->post_content, 
 				'season'     => (int) get_post_meta( $ep_id, '_tvm_season', true ),
 				'number'     => (int) get_post_meta( $ep_id, '_tvm_number', true ),
-				'air_date'   => $air_date,
+				'air_date'   => $formatted_date,
 				'sources'    => $sources, 
-				'is_future'  => ( $air_date && $air_date > $today ),
+				'is_future'  => ( $air_date_raw && $air_date_raw > $today ),
 				'is_watched' => isset( $user_progress[$ep_id] ) && ! empty( $user_progress[$ep_id]->watched_at )
 			);
 		}
