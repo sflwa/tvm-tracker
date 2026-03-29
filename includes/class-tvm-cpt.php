@@ -1,10 +1,10 @@
 <?php
 /**
  * Post Type Registration & Admin UI Columns
- * Version 1.0.3 - Enhanced Admin Filtering
+ * Version 1.0.4 - Full Admin UI Activation
  *
  * @package TV_Movie_Tracker
- * @version 1.0.3
+ * @version 1.0.4
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -45,9 +45,64 @@ class TVM_CPT {
 		add_action( 'manage_tvm_episode_posts_custom_column', array( $this, 'render_episode_columns' ), 10, 2 );
 		add_filter( 'manage_edit-tvm_episode_sortable_columns', array( $this, 'make_columns_sortable' ) );
 
-		// Hook: Admin Filters
+		// Hook: Admin Filtering
 		add_action( 'restrict_manage_posts', array( $this, 'add_episode_filters' ) );
 		add_action( 'parse_query', array( $this, 'filter_episodes_by_parent' ) );
+	}
+
+	/**
+	 * Define which columns appear in the Episode list.
+	 */
+	public function add_episode_columns( $columns ) {
+		$new_columns = array(
+			'cb'       => $columns['cb'],
+			'title'    => $columns['title'],
+			'parent'   => __( 'Parent Show', 'tvm-tracker' ),
+			'air_date' => __( 'Air Date', 'tvm-tracker' ),
+			'date'     => $columns['date'], 
+		);
+		return $new_columns;
+	}
+
+	/**
+	 * Fill the columns with data from Post Meta.
+	 */
+	public function render_episode_columns( $column, $post_id ) {
+		switch ( $column ) {
+			case 'parent':
+				$parent_id = get_post_meta( $post_id, '_tvm_parent_id', true );
+				if ( $parent_id ) {
+					echo '<a href="' . get_edit_post_link( absint($parent_id) ) . '"><strong>' . get_the_title( $parent_id ) . '</strong></a>';
+				} else {
+					echo '<span style="color:#d63638;">' . __( 'Orphaned', 'tvm-tracker' ) . '</span>';
+				}
+				break;
+
+			case 'air_date':
+				$date = get_post_meta( $post_id, '_tvm_air_date', true );
+				if ( $date ) {
+					$is_future = strtotime( $date ) > time();
+					$color     = $is_future ? '#2271b1' : '#646970';
+					$weight    = $is_future ? 'bold' : 'normal';
+					
+					echo '<span style="color:' . $color . '; font-weight:' . $weight . ';">';
+					echo date( 'M j, Y', strtotime( $date ) );
+					echo $is_future ? ' <small>(Upcoming)</small>' : '';
+					echo '</span>';
+				} else {
+					echo '—';
+				}
+				break;
+		}
+	}
+
+	/**
+	 * Make the Air Date and Parent columns sortable.
+	 */
+	public function make_columns_sortable( $columns ) {
+		$columns['air_date'] = 'air_date';
+		$columns['parent']   = 'parent';
+		return $columns;
 	}
 
 	/**
@@ -60,7 +115,6 @@ class TVM_CPT {
 
 		$parent_id = isset( $_GET['tvm_parent_filter'] ) ? absint( $_GET['tvm_parent_filter'] ) : 0;
 
-		// Get all TV shows to populate the filter dropdown
 		$shows = get_posts( array(
 			'post_type'      => 'tvm_item',
 			'posts_per_page' => -1,
@@ -101,61 +155,6 @@ class TVM_CPT {
 				),
 			) );
 		}
-	}
-
-	/**
-	 * Define which columns appear in the Episode list.
-	 */
-	public function add_episode_columns( $columns ) {
-		$new_columns = array(
-			'cb'       => $columns['cb'],
-			'title'    => $columns['title'],
-			'parent'   => __( 'Parent Show', 'tvm-tracker' ),
-			'air_date' => __( 'Air Date', 'tvm-tracker' ),
-			'date'     => $columns['date'], 
-		);
-		return $new_columns;
-	}
-
-	/**
-	 * Fill the columns with data from Post Meta.
-	 */
-	public function render_episode_columns( $column, $post_id ) {
-		switch ( $column ) {
-			case 'parent':
-				$parent_id = get_post_meta( $post_id, '_tvm_parent_id', true );
-				if ( $parent_id ) {
-					echo '<a href="' . get_edit_post_link( $parent_id ) . '"><strong>' . get_the_title( $parent_id ) . '</strong></a>';
-				} else {
-					echo '<span style="color:#d63638;">' . __( 'Orphaned', 'tvm-tracker' ) . '</span>';
-				}
-				break;
-
-			case 'air_date':
-				$date = get_post_meta( $post_id, '_tvm_air_date', true );
-				if ( $date ) {
-					$is_future = strtotime( $date ) > time();
-					$color     = $is_future ? '#2271b1' : '#646970';
-					$weight    = $is_future ? 'bold' : 'normal';
-					
-					echo '<span style="color:' . $color . '; font-weight:' . $weight . ';">';
-					echo date( 'M j, Y', strtotime( $date ) );
-					echo $is_future ? ' <small>(Upcoming)</small>' : '';
-					echo '</span>';
-				} else {
-					echo '—';
-				}
-				break;
-		}
-	}
-
-	/**
-	 * Make the Air Date and Parent column sortable.
-	 */
-	public function make_columns_sortable( $columns ) {
-		$columns['air_date'] = 'air_date';
-		$columns['parent']   = 'parent';
-		return $columns;
 	}
 
 	/**
