@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.2.2 - Season Subtabs Implementation
+ * Version: 1.2.3 - Added Last Sync Display
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -22,14 +22,11 @@ jQuery(function($) {
                 $('#tvm-watchlist-grid, .tvm-filters-container').show();
             });
 
-            // SEASON TAB NAVIGATION
             $(document).on('click', '.tvm-season-tab', (e) => {
                 const $tab = $(e.currentTarget);
                 const seasonNum = $tab.data('season');
-                
                 $('.tvm-season-tab').removeClass('active').css({'background': '#f5f5f5', 'color': '#666', 'font-weight': '600'});
                 $tab.addClass('active').css({'background': '#2271b1', 'color': '#fff', 'font-weight': '700'});
-                
                 $('.tvm-season-content-group').hide();
                 $(`#tvm-season-group-${seasonNum}`).show();
             });
@@ -40,16 +37,19 @@ jQuery(function($) {
                 $btn.prop('disabled', true).text('Syncing...');
                 $.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: id, nonce: tvm_app.nonce }, (res) => {
                     $btn.prop('disabled', false).text('Sync Episodes');
-                    if (res.success) { alert(res.data); this.loadEpisodes(id); }
+                    if (res.success) { 
+                        alert(res.data);
+                        // Refresh the entire watchlist cache to update the sync timestamp
+                        this.load(); 
+                        this.loadEpisodes(id); 
+                    }
                 });
             });
 
             $(document).on('click', '.tvm-ep-watch', (e) => {
                 const $btn = $(e.currentTarget);
                 const seriesId = $('#tvm-sync-episodes').data('id');
-                // Store active season before refreshing
                 const activeSeason = $('.tvm-season-tab.active').data('season');
-                
                 $.post(tvm_app.ajax_url, { 
                     action: 'tvm_toggle_episode_watched', 
                     episode_id: $btn.data('id'), 
@@ -112,9 +112,14 @@ jQuery(function($) {
             const item = window.tvm_tv_cache.find(i => i.id == id);
             $('#tvm-watchlist-grid, .tvm-filters-container').hide();
             $('#tvm-tv-detail-view').show();
+            
+            // Added Last Sync display next to title
             $('#tvm-series-content').html(`
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <h3 style="margin:0;">${item.title}</h3>
+                    <div style="display:flex; align-items:baseline; gap:12px;">
+                        <h3 style="margin:0;">${item.title}</h3>
+                        <span style="font-size:12px; color:#999; font-style:italic;">Last Sync: ${item.last_sync}</span>
+                    </div>
                     <button id="tvm-sync-episodes" class="button button-primary" data-id="${id}">Sync Episodes</button>
                 </div>
                 <div id="tvm-season-nav" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:25px; border-bottom:1px solid #eee; padding-bottom:15px;"></div>
@@ -139,41 +144,24 @@ jQuery(function($) {
         fetchEpisodeData: function(id, restoreSeason) {
             $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_episodes', post_id: id, nonce: tvm_app.nonce }, (res) => {
                 if (res.success) {
-                    // Group episodes by season
                     const grouped = {};
                     res.data.forEach(ep => {
                         if (!grouped[ep.season]) grouped[ep.season] = [];
                         grouped[ep.season].push(ep);
                     });
-
                     const seasons = Object.keys(grouped).sort((a, b) => a - b);
                     let navHtml = '';
                     let contentHtml = '';
-
                     seasons.forEach((sNum, index) => {
-                        // Season Tab
                         const isActive = (restoreSeason) ? (sNum == restoreSeason) : (index === 0);
-                        const tabStyle = isActive 
-                            ? 'background: #2271b1; color: #fff; font-weight: 700;' 
-                            : 'background: #f5f5f5; color: #666; font-weight: 600;';
-                        
+                        const tabStyle = isActive ? 'background:#2271b1; color:#fff; font-weight:700;' : 'background:#f5f5f5; color:#666; font-weight:600;';
                         navHtml += `<button class="tvm-season-tab ${isActive ? 'active' : ''}" data-season="${sNum}" style="border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; transition:0.2s; ${tabStyle}">Season ${sNum}</button>`;
-
-                        // Season Content Group
                         contentHtml += `<div id="tvm-season-group-${sNum}" class="tvm-season-content-group" style="display:${isActive ? 'flex' : 'none'}; flex-direction:column; gap:12px;">`;
-                        
                         grouped[sNum].forEach(ep => {
                             const statusColor = ep.is_watched ? '#46b450' : '#ddd';
-                            const sourceContent = ep.is_future 
-                                ? '<span style="font-size:10px; color:#2271b1; text-transform:uppercase; background:#e7f3ff; padding:4px 8px; border-radius:4px; font-weight:700;">Upcoming</span>'
-                                : this.renderSources(ep.sources);
-
-                            const watchAction = ep.is_future
-                                ? '<span class="dashicons dashicons-clock" style="color:#bbb; font-size:24px; width:24px; height:24px; cursor:default;" title="Available on air date"></span>'
-                                : `<span class="dashicons ${ep.is_watched ? 'dashicons-visibility' : 'dashicons-hidden'} tvm-ep-watch" data-id="${ep.id}" data-watched="${!ep.is_watched}" style="cursor:pointer; color:${statusColor}; font-size:24px; width:24px; height:24px;"></span>`;
-                            
+                            const sourceContent = ep.is_future ? '<span style="font-size:10px; color:#2271b1; text-transform:uppercase; background:#e7f3ff; padding:4px 8px; border-radius:4px; font-weight:700;">Upcoming</span>' : this.renderSources(ep.sources);
+                            const watchAction = ep.is_future ? '<span class="dashicons dashicons-clock" style="color:#bbb; font-size:24px; width:24px; height:24px; cursor:default;" title="Available on air date"></span>' : `<span class="dashicons ${ep.is_watched ? 'dashicons-visibility' : 'dashicons-hidden'} tvm-ep-watch" data-id="${ep.id}" data-watched="${!ep.is_watched}" style="cursor:pointer; color:${statusColor}; font-size:24px; width:24px; height:24px;"></span>`;
                             let cleanTitle = ep.title.replace(/^S\d+E\d+\s-\s/i, '');
-                            
                             contentHtml += `
                             <div class="tvm-episode-row" style="border-left-color: ${statusColor};">
                                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -191,7 +179,6 @@ jQuery(function($) {
                         });
                         contentHtml += `</div>`;
                     });
-
                     $('#tvm-season-nav').html(navHtml);
                     $('#tvm-episode-results').html(contentHtml);
                 }
@@ -208,7 +195,6 @@ jQuery(function($) {
             const masterList = settings.master_sources || [];
             let html = '';
             let validCount = 0;
-
             sources.forEach(s => {
                 const sid = parseInt(s.source_id);
                 if (['rent', 'buy', 'purchase'].includes(s.type)) return;
