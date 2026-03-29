@@ -1,6 +1,6 @@
 /**
  * Plugin: TV & Movie Tracker
- * Version: 1.2.0
+ * Version: 1.2.2
  * Author: South Florida Web Advisors
  */
 
@@ -176,7 +176,58 @@
     z-index: 10;
 }
 
-/* --- EPISODE LISTS (RESTORED TO ORIGINAL) --- */
+/* --- SETTINGS GRID --- */
+.tvm-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 15px;
+    align-items: start;
+}
+
+.tvm-setting-card {
+    position: relative;
+    cursor: pointer;
+    border-radius: 10px;
+    padding: 15px 10px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 110px;
+    transition: all 0.2s;
+    border: 2px solid #eee;
+}
+
+.tvm-setting-card.active {
+    background: #f0fdf4 !important;
+    border-color: #46b450 !important;
+}
+
+.tvm-setting-card img {
+    width: 45px;
+    height: 45px;
+    object-fit: contain;
+    margin-bottom: 10px;
+    display: block;
+}
+
+/* --- SEASON TABS --- */
+.tvm-season-tab {
+    min-width: 100px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s, color 0.2s;
+}
+
+/* --- EPISODE LISTS --- */
 .tvm-episode-row {
     display: flex;
     flex-direction: column;
@@ -200,9 +251,9 @@
 }
 
 .tvm-episode-sources img {
-    width: 32px;
-    height: 32px;
-    border-radius: 4px;
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
     border: 1px solid #eee;
     object-fit: contain;
     background: #fff;
