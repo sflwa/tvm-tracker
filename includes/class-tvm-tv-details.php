@@ -1,7 +1,10 @@
 <?php
 /**
  * AJAX TV Details Handler
- * Version 1.1.1 - Added Episode Sources & Overview
+ * Version 1.1.2 - Enhanced Source Serialization Fix
+ *
+ * @package TV_Movie_Tracker
+ * @version 1.1.2
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -39,8 +42,11 @@ class TVM_TV_Details {
 			$ep_id = $ep->ID;
 			$air_date = get_post_meta( $ep_id, '_tvm_air_date', true );
 			
-			// FETCH THE SYNCED DATA
-			$sources = get_post_meta( $ep_id, '_tvm_episode_sources', true ) ?: array();
+			// Ensure we are getting the array and not a serialized string
+			$sources = get_post_meta( $ep_id, '_tvm_episode_sources', true );
+			if ( ! is_array( $sources ) ) {
+				$sources = array();
+			}
 
 			$data[] = array(
 				'id'         => $ep_id,
@@ -49,7 +55,7 @@ class TVM_TV_Details {
 				'season'     => (int) get_post_meta( $ep_id, '_tvm_season', true ),
 				'number'     => (int) get_post_meta( $ep_id, '_tvm_number', true ),
 				'air_date'   => $air_date,
-				'sources'    => $sources, // Passed to JS for Rule filtering
+				'sources'    => $sources, 
 				'is_future'  => ( $air_date && $air_date > $today ),
 				'is_watched' => isset( $user_progress[$ep_id] ) && ! empty( $user_progress[$ep_id]->watched_at )
 			);
