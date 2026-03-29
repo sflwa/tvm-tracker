@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.2.8 - Grid Restoration Fix
+ * Version: 1.2.9 - Reverted to 6-Column Grid
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -50,7 +50,8 @@ jQuery(function($) {
                     await $.post(tvm_app.ajax_url, { action: 'tvm_toggle_episode_watched', episode_id: $(unwatchedItems[i]).data('id'), watched: 'true', nonce: tvm_app.nonce });
                 }
                 this.load(); 
-                this.loadEpisodes($('#tvm-sync-episodes').data('id') || $('.tvm-unwatched-active .tvm-tv-trigger').data('id'), $('.tvm-season-tab.active').data('season'));
+                const seriesId = $('#tvm-sync-episodes').data('id') || $('.tvm-unwatched-active .tvm-tv-trigger').data('id');
+                this.loadEpisodes(seriesId, $('.tvm-season-tab.active').data('season'));
             });
 
             $(document).on('click', '#tvm-sync-episodes', (e) => {
@@ -105,9 +106,7 @@ jQuery(function($) {
         },
 
         render: function(items, isUnwatchedView) {
-            // FIX: Standard Grid for All/Watched/Upcoming, 12-col ONLY for Unwatched
-            const gridClass = isUnwatchedView ? 'tvm-grid-unwatched' : 'tvm-locked-grid';
-            let html = `<div class="${gridClass}">`;
+            let html = `<div class="tvm-locked-grid">`;
             
             items.forEach(item => {
                 const badge = isUnwatchedView ? `<div class="tvm-badge-stats">${item.ep_count - item.ep_watched}</div>` : `<div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>`;
@@ -119,7 +118,7 @@ jQuery(function($) {
                             <img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">
                         </div>
                     </div>
-                    ${isUnwatchedView ? '' : `<h5 style="margin:8px 0; font-size:11px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>`}
+                    <h5 style="margin:8px 0; font-size:11px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>
                 </div>`;
             });
             html += `</div>`;
