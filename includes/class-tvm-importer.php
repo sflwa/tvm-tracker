@@ -1,7 +1,7 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.0.1 - Visibility Fix
+ * Version 2.0.2 - Restoration of AJAX Import Hook
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -11,9 +11,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 class TVM_Importer {
 
 	public function __construct() {
+		// HOOKS
+		add_action( 'wp_ajax_tvm_import_item', array( $this, 'handle_import' ) );
 		add_action( 'wp_ajax_tvm_sync_series', array( $this, 'handle_manual_sync' ) );
 		
-		// CRON Hooks
+		// CRON
 		add_action( 'tvm_weekly_sync_event', array( $this, 'run_weekly_sync' ) );
 		add_action( 'tvm_monthly_sync_event', array( $this, 'run_monthly_sync' ) );
 		
@@ -25,41 +27,62 @@ class TVM_Importer {
 		}
 	}
 
-	/**
-	 * TV WEEKLY LOGIC:
-	 * 1) Metadata from TVMaze for all shows
-	 * 2) Watchmode sources for series with unwatched eps AND no sources
-	 */
+	public function handle_import() {
+		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
+		$tmdb_id = isset( $_POST['tmdb_id'] ) ? absint( $_POST['tmdb_id'] ) : 0;
+		$type    = isset( $_POST['type'] ) ? sanitize_text_field( $_POST['type'] ) : 'movie';
+		global $wpdb;
+
+		$post_id = $wpdb->get_var( $wpdb->prepare(
+			"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_tvm_tmdb_id' AND meta_value = %s LIMIT 1",
+			$tmdb_id
+		) );
+
+		if ( ! $post_id ) {
+			$api = TVM_Tracker::get_instance()->tmdb;
+			$details = $api->get_details( $tmdb_id, $type );
+			if ( is_wp_error( $details ) ) { wp_send_json_error( $details->get_error_message() ); }
+
+			$post_id = wp_insert_post( array(
+				'post_title'   => ( 'tv' === $type ) ? $details['name'] : $details['title'],
+				'post_content' => $details['overview'] ?? '',
+				'post_status'  => 'publish',
+				'post_type'    => 'tvm_item',
+			) );
+
+			update_post_meta( $post_id, '_tvm_tmdb_id', $tmdb_id );
+			update_post_meta( $post_id, '_tvm_media_type', $type );
+			update_post_meta( $post_id, '_tvm_poster_path', $details['poster_path'] );
+			
+			$tvdb_id = $details['external_ids']['tvdb_id'] ?? 0;
+			$imdb_id = $details['external_ids']['imdb_id'] ?? '';
+			update_post_meta( $post_id, '_tvm_tvdb_id', $tvdb_id );
+			update_post_meta( $post_id, '_tvm_imdb_id', $imdb_id );
+		}
+
+		// Final Step: Sync metadata and sources immediately after tracking
+		$this->sync_tvmaze_metadata( $post_id, get_post_meta( $post_id, '_tvm_tvdb_id', true ) );
+		$this->sync_watchmode_data( $post_id, get_post_meta( $post_id, '_tvm_imdb_id', true ) );
+
+		wp_send_json_success( array( 'post_id' => $post_id ) );
+	}
+
 	public function run_weekly_sync() {
 		$shows = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1, 'meta_key' => '_tvm_media_type', 'meta_value' => 'tv' ) );
-		
 		foreach ( $shows as $show ) {
-			$tvdb_id = get_post_meta( $show->ID, '_tvm_tvdb_id', true );
-			$imdb_id = get_post_meta( $show->ID, '_tvm_imdb_id', true );
-			
-			$this->sync_tvmaze_metadata( $show->ID, $tvdb_id );
-
+			$this->sync_tvmaze_metadata( $show->ID, get_post_meta( $show->ID, '_tvm_tvdb_id', true ) );
 			if ( $this->needs_sources_sync( $show->ID ) ) {
-				$this->sync_watchmode_data( $show->ID, $imdb_id );
+				$this->sync_watchmode_data( $show->ID, get_post_meta( $show->ID, '_tvm_imdb_id', true ) );
 			}
 		}
 	}
 
-	/**
-	 * TV/MOVIE MONTHLY LOGIC:
-	 * 1) TV: Watchmode for any series with unwatched episodes
-	 * 2) Movie: Watchmode for unwatched movies
-	 */
 	public function run_monthly_sync() {
 		$items = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1 ) );
-		
 		foreach ( $items as $item ) {
-			$type      = get_post_meta( $item->ID, '_tvm_media_type', true );
-			$imdb_id   = get_post_meta( $item->ID, '_tvm_imdb_id', true );
-			$is_watched = $this->is_item_fully_watched( $item->ID, $type );
-
-			if ( ! $is_watched ) {
-				$this->sync_watchmode_data( $item->ID, $imdb_id );
+			$type = get_post_meta( $item->ID, '_tvm_media_type', true );
+			if ( ! $this->is_item_fully_watched( $item->ID, $type ) ) {
+				$this->sync_watchmode_data( $item->ID, get_post_meta( $item->ID, '_tvm_imdb_id', true ) );
 			}
 		}
 	}
@@ -96,16 +119,13 @@ class TVM_Importer {
 	public function handle_manual_sync() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		$post_id = absint( $_POST['post_id'] );
-		$imdb_id = get_post_meta( $post_id, '_tvm_imdb_id', true );
-		$tvdb_id = get_post_meta( $post_id, '_tvm_tvdb_id', true );
-		
-		$this->sync_tvmaze_metadata( $post_id, $tvdb_id );
-		$this->sync_watchmode_data( $post_id, $imdb_id );
-		
+		$this->sync_tvmaze_metadata( $post_id, get_post_meta( $post_id, '_tvm_tvdb_id', true ) );
+		$this->sync_watchmode_data( $post_id, get_post_meta( $post_id, '_tvm_imdb_id', true ) );
 		wp_send_json_success( "Manual Sync Complete." );
 	}
 
 	public function sync_tvmaze_metadata( $post_id, $tvdb_id ) {
+		if (!$tvdb_id) return;
 		$tvmaze = new TVM_API_TVMAZE();
 		$lookup = $tvmaze->get_id_by_external( $tvdb_id );
 		if ( ! is_wp_error( $lookup ) && isset( $lookup['id'] ) ) {
