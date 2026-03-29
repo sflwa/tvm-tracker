@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.4.5 - Restored Mark Season Logic
+ * Version: 1.4.6 - Stats Restoration & Mobile UI
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -52,35 +52,22 @@ jQuery(function($) {
                 $(`#tvm-season-group-${$tab.data('season')}`).show();
             });
 
-            // RESTORED: Mark Full Season Watched Logic
             $(document).on('click', '.tvm-mark-season-watched', async (e) => {
                 const $btn = $(e.currentTarget);
                 const $group = $btn.closest('.tvm-season-content-group');
                 const unwatchedItems = $group.find('.tvm-ep-watch[data-watched="true"]');
                 
-                if (unwatchedItems.length === 0) {
-                    alert('All episodes in this season are already watched.');
-                    return;
-                }
-
+                if (unwatchedItems.length === 0) return;
                 if (!confirm(`Mark ${unwatchedItems.length} episodes as watched?`)) return;
                 
                 $btn.prop('disabled', true).text('Processing...');
-                
                 for (let i = 0; i < unwatchedItems.length; i++) {
-                    const epId = $(unwatchedItems[i]).data('id');
-                    await $.post(tvm_app.ajax_url, { 
-                        action: 'tvm_toggle_episode_watched', 
-                        episode_id: epId, 
-                        watched: 'true', 
-                        nonce: tvm_app.nonce 
-                    });
+                    await $.post(tvm_app.ajax_url, { action: 'tvm_toggle_episode_watched', episode_id: $(unwatchedItems[i]).data('id'), watched: 'true', nonce: tvm_app.nonce });
                 }
                 
                 this.load(); 
                 const seriesId = $('#tvm-sync-episodes').data('id') || $('#tvm-unwatched-dropdown').val();
-                const activeSeason = $('.tvm-season-tab.active').data('season');
-                this.loadEpisodes(seriesId, activeSeason);
+                this.loadEpisodes(seriesId, $('.tvm-season-tab.active').data('season'));
             });
 
             $(document).on('click', '.tvm-ep-watch', (e) => {
@@ -125,11 +112,10 @@ jQuery(function($) {
 
             $(document).on('click', '#tvm-sync-episodes', (e) => {
                 const $btn = $(e.currentTarget);
-                const id = $btn.data('id');
                 $btn.prop('disabled', true).text('Syncing...');
-                $.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: id, nonce: tvm_app.nonce }, (res) => {
+                $.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: $btn.data('id'), nonce: tvm_app.nonce }, (res) => {
                     $btn.prop('disabled', false).text('Sync Episodes');
-                    if (res.success) { alert(res.data); this.load(); this.loadEpisodes(id); }
+                    if (res.success) { alert(res.data); this.load(); this.loadEpisodes($btn.data('id')); }
                 });
             });
         },
@@ -139,6 +125,43 @@ jQuery(function($) {
             $(`.tvm-filter-btn[data-filter="${filterName}"]`).addClass('active');
             if (filterName === 'calendar') this.renderCalendarView();
             else this.load();
+        },
+
+        load: function() {
+            if ($('.tvm-filter-btn.active').data('filter') === 'calendar') { this.renderCalendarView(); return; }
+            TVM_Core.showLoading();
+            $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_watchlist', nonce: tvm_app.nonce }, (res) => {
+                TVM_Core.hideLoading();
+                if (res.success) {
+                    window.tvm_tv_cache = res.data.items;
+                    this.updateStats(res.data.stats); // Restore Stats Call
+                    this.applyFilter();
+                }
+            });
+        },
+
+        updateStats: function(s) {
+            if (!s) return;
+            const html = `TV: ${s.series} Shows • ${s.episodes} Episodes • ${s.watched} Watched • ${s.percent}%`;
+            $('#tvm-stats-display').html(html);
+        },
+
+        applyFilter: function() {
+            const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
+            const search = $('#tvm-vault-search-input').val().toLowerCase();
+            const streamOnly = $('#tvm-stream-only-toggle').is(':checked');
+            let items = [...(window.tvm_tv_cache || [])];
+            
+            if (filter === 'watched') items = items.filter(i => i.ep_watched > 0);
+            else if (filter === 'released') items = items.filter(i => i.has_aired_unwatched === true);
+            else if (filter === 'upcoming') items = items.filter(i => i.has_upcoming === true);
+
+            if (streamOnly) items = items.filter(i => i.has_streaming === true);
+            if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
+
+            items.sort((a, b) => a.title.localeCompare(b.title));
+            TVM_Core.updateCounter(items.length);
+            this.render(items, filter === 'released');
         },
 
         renderCalendarView: function() {
@@ -209,40 +232,23 @@ jQuery(function($) {
             if ($(window).width() < 800) { $('html, body').animate({ scrollTop: $('#tvm-calendar-details').offset().top - 100 }, 500); }
         },
 
-        load: function() {
-            if ($('.tvm-filter-btn.active').data('filter') === 'calendar') { this.renderCalendarView(); return; }
-            TVM_Core.showLoading();
-            $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_watchlist', nonce: tvm_app.nonce }, (res) => {
-                TVM_Core.hideLoading();
-                if (res.success) {
-                    window.tvm_tv_cache = res.data.items;
-                    this.applyFilter();
-                }
-            });
-        },
-
-        applyFilter: function() {
-            const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
-            const search = $('#tvm-vault-search-input').val().toLowerCase();
-            const streamOnly = $('#tvm-stream-only-toggle').is(':checked');
-            let items = [...(window.tvm_tv_cache || [])];
-            if (filter === 'watched') items = items.filter(i => i.ep_watched > 0);
-            else if (filter === 'released') items = items.filter(i => i.has_aired_unwatched === true);
-            else if (filter === 'upcoming') items = items.filter(i => i.has_upcoming === true);
-            if (streamOnly) items = items.filter(i => i.has_streaming === true);
-            if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
-            items.sort((a, b) => a.title.localeCompare(b.title));
-            TVM_Core.updateCounter(items.length);
-            this.render(items, filter === 'released');
-        },
-
         render: function(items, isUnwatchedView) {
             let html = '';
             if (isUnwatchedView) {
                 html += `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div style="display:flex; align-items:center; gap:10px;"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}">(${i.aired_unwatched_count}) ${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:none; margin-top:20px;"></div></div>`;
                 $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(html);
             } else {
-                html = items.map(item => `<div class="tvm-movie-card"><div class="tvm-overlay-controls"><span class="dashicons dashicons-trash tvm-delete-item" data-id="${item.id}" style="color:#ff4d4d;"></span></div><div class="tvm-poster-wrapper"><div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div><div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;"><img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;"></div></div><h5 style="margin:8px 0; font-size:11px; text-align:center; color:#333; font-weight:600;">${item.title}</h5></div>`).join('');
+                html = items.map(item => `
+                <div class="tvm-movie-card">
+                    <div class="tvm-overlay-controls"><span class="dashicons dashicons-trash tvm-delete-item" data-id="${item.id}" style="color:#ff4d4d;"></span></div>
+                    <div class="tvm-poster-wrapper">
+                        <div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>
+                        <div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;">
+                            <img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">
+                        </div>
+                    </div>
+                    <h5 style="margin:8px 0; font-size:11px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>
+                </div>`).join('');
                 $('#tvm-watchlist-grid').addClass('tvm-locked-grid').html(html || '<p style="grid-column:1/-1; text-align:center; padding:40px;">No series found.</p>');
             }
         },
