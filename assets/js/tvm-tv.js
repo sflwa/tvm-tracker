@@ -1,12 +1,14 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.5.7 - Kill Recursion Loop & Listen for Ready Event
+ * Version: 1.6.0 - Calendar Detail Overviews
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
     const TVModule = {
         currentMonth: new Date(),
         calendarEvents: [],
+        activeCalendarDate: null,
+        activeUnwatchedId: null,
 
         init: function() {
             setTimeout(() => {
@@ -14,7 +16,6 @@ jQuery(function($) {
                 else if (window.location.hash === '#tv-calendar') this.switchToFilter('calendar');
             }, 200);
 
-            // Re-render when core settings are loaded
             $(document).on('tvm_settings_ready', () => {
                 if ($('#tvm-episode-results').is(':visible')) {
                     const seriesId = $('#tvm-sync-episodes').data('id') || $('#tvm-unwatched-dropdown').val();
@@ -35,20 +36,28 @@ jQuery(function($) {
 
             $(document).on('tvm_filter_change', (e, filter) => {
                 if (window.current_media_type === 'tv') {
-                    if (filter === 'calendar') this.renderCalendarView();
-                    else this.applyFilter();
+                    if (filter === 'calendar') {
+                        this.activeUnwatchedId = null; 
+                        this.renderCalendarView();
+                    } else {
+                        this.applyFilter();
+                    }
                 }
             });
 
             $(document).on('click', '.tvm-cal-nav', (e) => {
                 const dir = $(e.currentTarget).data('dir');
                 this.currentMonth.setMonth(this.currentMonth.getMonth() + (dir === 'next' ? 1 : -1));
+                this.activeCalendarDate = null;
                 this.renderCalendarView();
             });
 
             $(document).on('click', '.tvm-calendar-day', (e) => {
                 const date = $(e.currentTarget).data('date');
-                if (date) this.showDayDetails(date);
+                if (date) {
+                    this.activeCalendarDate = date;
+                    this.showDayDetails(date);
+                }
             });
 
             $(document).on('click', '.tvm-tv-trigger', (e) => this.showSeriesDetails($(e.currentTarget).data('id')));
@@ -94,8 +103,17 @@ jQuery(function($) {
                     nonce: tvm_app.nonce 
                 }, () => {
                     const filter = $('.tvm-filter-btn.active').data('filter');
-                    if (filter === 'calendar') this.renderCalendarView();
-                    else {
+                    if (filter === 'calendar') {
+                        this.renderCalendarView();
+                    } else if (filter === 'released' && this.activeUnwatchedId) {
+                        $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_watchlist', nonce: tvm_app.nonce }, (res) => {
+                            if (res.success) {
+                                window.tvm_tv_cache = res.data.items;
+                                this.updateStats(res.data.stats);
+                                this.showInlineEpisodes(this.activeUnwatchedId);
+                            }
+                        });
+                    } else {
                         const seriesId = $('#tvm-sync-episodes').data('id') || $('#tvm-unwatched-dropdown').val();
                         if (seriesId) this.loadEpisodes(seriesId, $('.tvm-season-tab.active').data('season'));
                         this.load();
@@ -105,6 +123,7 @@ jQuery(function($) {
 
             $(document).on('change', '#tvm-unwatched-dropdown', (e) => {
                 const id = $(e.target).val();
+                this.activeUnwatchedId = id;
                 if (id) this.showInlineEpisodes(id);
                 else $('#tvm-unwatched-inline-container').hide();
             });
@@ -235,26 +254,43 @@ jQuery(function($) {
 
             html += `</div><div id="tvm-calendar-details" style="margin-top:25px;"></div></div>`;
             $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(html);
+
+            if (this.activeCalendarDate) {
+                this.showDayDetails(this.activeCalendarDate);
+            }
         },
 
         showDayDetails: function(date) {
             const dayEvents = this.calendarEvents.filter(e => e.air_date === date);
-            if (dayEvents.length === 0) return;
+            if (dayEvents.length === 0) {
+                $('#tvm-calendar-details').empty();
+                return;
+            }
             let html = `<h3 style="margin-bottom:15px; font-size:20px;">Airing on ${date}</h3>`;
             dayEvents.forEach(ev => {
                 const iconClass = ev.is_watched ? 'dashicons-visibility' : 'dashicons-hidden';
                 const iconColor = ev.is_watched ? '#46b450' : '#ccc';
-                html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:15px; background:#fff; border:1px solid #eee; border-radius:10px; margin-bottom:10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);"><div><strong style="color:#2271b1; font-size:16px;">${ev.series}</strong><br><span style="font-size:13px; color:#666;">${ev.display} - ${ev.title}</span></div><span class="dashicons ${iconClass} tvm-ep-watch" data-id="${ev.id}" data-watched="${!ev.is_watched}" style="cursor:pointer; font-size:28px; width:28px; height:28px; color:${iconColor};"></span></div>`;
+                html += `
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:20px; background:#fff; border:1px solid #eee; border-radius:12px; margin-bottom:15px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                    <div style="flex:1; padding-right:20px;">
+                        <strong style="color:#2271b1; font-size:16px; display:block; margin-bottom:4px;">${ev.series}</strong>
+                        <span style="font-size:14px; color:#1d2327; font-weight:700;">${ev.display} - ${ev.title}</span>
+                        <div style="margin-top:10px; font-size:13px; line-height:1.5; color:#666;">${ev.overview || 'No description available.'}</div>
+                    </div>
+                    <span class="dashicons ${iconClass} tvm-ep-watch" data-id="${ev.id}" data-watched="${!ev.is_watched}" style="cursor:pointer; font-size:28px; width:28px; height:28px; color:${iconColor};"></span>
+                </div>`;
             });
             $('#tvm-calendar-details').html(html);
-            if ($(window).width() < 800) { $('html, body').animate({ scrollTop: $('#tvm-calendar-details').offset().top - 100 }, 500); }
         },
 
         render: function(items, isUnwatchedView) {
             let html = '';
             if (isUnwatchedView) {
-                html += `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div style="display:flex; align-items:center; gap:10px;"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}">(${i.aired_unwatched_count}) ${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:none; margin-top:20px;"></div></div>`;
+                const selectedAttr = (id) => (this.activeUnwatchedId == id) ? 'selected' : '';
+                html += `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div style="display:flex; align-items:center; gap:10px;"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}" ${selectedAttr(i.id)}>(${i.aired_unwatched_count}) ${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:20px;"></div></div>`;
                 $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(html);
+                
+                if (this.activeUnwatchedId) this.showInlineEpisodes(this.activeUnwatchedId);
             } else {
                 html = items.map(item => `
                 <div class="tvm-movie-card">
@@ -273,6 +309,10 @@ jQuery(function($) {
 
         showInlineEpisodes: function(id) {
             const item = window.tvm_tv_cache.find(i => i.id == id);
+            if (!item) {
+                $('#tvm-unwatched-inline-container').hide();
+                return;
+            }
             $('#tvm-unwatched-inline-container').show().html(`<div style="padding-top:10px;"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;"><h3 style="margin:0;">${item.title}</h3><span style="font-size:12px; color:#999; font-style:italic;">Last Sync: ${item.last_sync}</span></div><div id="tvm-season-nav" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;"></div><div id="tvm-episode-results">Loading episodes...</div></div>`);
             this.loadEpisodes(id);
         },
@@ -312,25 +352,18 @@ jQuery(function($) {
         },
         renderSources: function(sources) {
             if (!sources || !Array.isArray(sources) || sources.length === 0) return '<span style="font-size:10px; color:#999; text-transform:uppercase; background:#f5f5f5; padding:4px 8px; border-radius:4px; font-weight:700;">No Sources</span>';
-            
             const sdata = window.tvm_settings_data || {};
             const userv = (sdata.user_services || []).map(Number);
             const preg = (sdata.primary_region || 'US').toString().trim().toUpperCase();
             const mlist = sdata.master_sources || [];
-            
-            if (userv.length === 0 && mlist.length === 0) {
-                return `<span style="font-size:10px; color:#999; font-style:italic;">Loading sources...</span>`;
-            }
-
+            if (userv.length === 0 && mlist.length === 0) return `<span style="font-size:10px; color:#999; font-style:italic;">Loading sources...</span>`;
             let html = '', count = 0;
             sources.forEach(s => {
                 const sid = Number(s.source_id);
                 const sType = (s.type || '').toString().trim().toLowerCase();
                 const sRegion = (s.region || '').toString().trim().toUpperCase();
-
                 if (['rent', 'buy', 'purchase'].includes(sType)) return;
                 if (!userv.includes(sid)) return;
-
                 if (sType === 'free' || (sType === 'sub' && sRegion === preg)) {
                     const m = mlist.find(master => Number(master.id) === sid);
                     if (m && m.logo_100px) { 
