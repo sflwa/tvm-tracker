@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX TV Watchlist Handler
- * Version 1.0.7 - Context-Aware Streaming Logic
+ * Version 1.0.8 - Calendar Overview Support
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -35,7 +35,7 @@ class TVM_TV_Handler {
 		$end_date   = date( 'Y-m-t', strtotime( $start_date ) );
 
 		$episodes = $wpdb->get_results( $wpdb->prepare(
-			"SELECT p.ID, p.post_title, m1.meta_value as air_date, m2.meta_value as parent_id, m3.meta_value as ep_num, m4.meta_value as season_num
+			"SELECT p.ID, p.post_title, p.post_content, m1.meta_value as air_date, m2.meta_value as parent_id, m3.meta_value as ep_num, m4.meta_value as season_num
 			 FROM {$wpdb->posts} p
 			 JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_air_date'
 			 JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_parent_id'
@@ -59,6 +59,7 @@ class TVM_TV_Handler {
 				'id'         => $ep->ID,
 				'series'     => get_the_title( $ep->parent_id ),
 				'title'      => $ep->post_title,
+				'overview'   => $ep->post_content,
 				'air_date'   => $ep->air_date,
 				'display'    => $ep->season_num . 'x' . $ep->ep_num,
 				'is_watched' => (bool) $is_watched
@@ -140,7 +141,6 @@ class TVM_TV_Handler {
 
 						if ( $is_future ) $has_upcoming = true;
 
-                        // FIX: Only flag series as 'streaming' if an unwatched, aired episode is available
 						if ( ! $has_unwatched_streaming && ! $is_watched && ! $is_future && ! empty( $ep->sources ) ) {
 							$sources = maybe_unserialize( $ep->sources );
 							if ( is_array( $sources ) ) {
