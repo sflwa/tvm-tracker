@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - Main Styles
- * Version 1.4.4 - Comprehensive Integration & Mobile Fixes
+ * Version 1.4.7 - Unwatched Mobile Layout Fixes
  */
 
 #tvm-app-container {
@@ -47,7 +47,7 @@
 .tvm-filters {
     display: flex;
     gap: 8px;
-    flex-wrap: wrap; /* Fix: Allow filter buttons to wrap on mobile */
+    flex-wrap: wrap; 
 }
 
 .tvm-filter-btn {
@@ -66,7 +66,7 @@
     .tvm-filter-btn {
         padding: 6px 12px;
         font-size: 12px;
-        flex: 1 1 auto; /* Fix: Buttons fill width on small screens */
+        flex: 1 1 auto; 
         text-align: center;
     }
 }
@@ -85,8 +85,23 @@
     width: 100%;
 }
 
-@media (max-width: 1000px) { .tvm-locked-grid { grid-template-columns: repeat(4, 1fr); } }
-@media (max-width: 700px) { .tvm-locked-grid { grid-template-columns: repeat(2, 1fr); } }
+/* New High Density Grid for Unwatched Desktop View */
+.tvm-unwatched-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 12px;
+    width: 100%;
+}
+
+@media (max-width: 1200px) { .tvm-unwatched-grid { grid-template-columns: repeat(8, 1fr); } }
+@media (max-width: 1000px) { 
+    .tvm-locked-grid { grid-template-columns: repeat(4, 1fr); }
+    .tvm-unwatched-grid { grid-template-columns: repeat(6, 1fr); }
+}
+@media (max-width: 700px) { 
+    .tvm-locked-grid { grid-template-columns: repeat(2, 1fr); }
+    .tvm-unwatched-grid { grid-template-columns: repeat(3, 1fr); }
+}
 
 .tvm-movie-card {
     position: relative;
@@ -380,6 +395,23 @@
 .tvm-unwatched-active {
     outline: 4px solid #2271b1;
     outline-offset: -4px;
+    border-radius: 8px;
+}
+
+/* Mobile Dropdown Fix */
+.tvm-unwatched-nav-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+@media (max-width: 600px) {
+    .tvm-unwatched-nav-container select {
+        flex: 1;
+        min-width: 0; /* Allows select to shrink below default size */
+        max-width: calc(100% - 80px); /* Ensures arrows have space */
+    }
 }
 
 #tvm-unwatched-inline-container {
