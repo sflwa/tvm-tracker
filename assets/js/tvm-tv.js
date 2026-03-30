@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.6.0 - Calendar Detail Overviews
+ * Version: 1.6.3 - Layout Fix for Unwatched Dropdown
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -60,7 +60,18 @@ jQuery(function($) {
                 }
             });
 
-            $(document).on('click', '.tvm-tv-trigger', (e) => this.showSeriesDetails($(e.currentTarget).data('id')));
+            $(document).on('click', '.tvm-tv-trigger', (e) => {
+                const id = $(e.currentTarget).data('id');
+                const filter = $('.tvm-filter-btn.active').data('filter');
+                
+                if (filter === 'released' && $(window).width() >= 800) {
+                    this.activeUnwatchedId = id;
+                    this.showInlineEpisodes(id);
+                    $('html, body').animate({ scrollTop: $('#tvm-unwatched-inline-container').offset().top - 100 }, 500);
+                } else {
+                    this.showSeriesDetails(id);
+                }
+            });
 
             $(document).on('click', '#tvm-back-to-grid', (e) => {
                 e.preventDefault();
@@ -286,11 +297,27 @@ jQuery(function($) {
         render: function(items, isUnwatchedView) {
             let html = '';
             if (isUnwatchedView) {
-                const selectedAttr = (id) => (this.activeUnwatchedId == id) ? 'selected' : '';
-                html += `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div style="display:flex; align-items:center; gap:10px;"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}" ${selectedAttr(i.id)}>(${i.aired_unwatched_count}) ${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:20px;"></div></div>`;
-                $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(html);
-                
-                if (this.activeUnwatchedId) this.showInlineEpisodes(this.activeUnwatchedId);
+                if ($(window).width() < 800) {
+                    const selectedAttr = (id) => (this.activeUnwatchedId == id) ? 'selected' : '';
+                    html += `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div class="tvm-unwatched-nav-container"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}" ${selectedAttr(i.id)}>(${i.aired_unwatched_count}) ${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:20px;"></div></div>`;
+                    $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(html);
+                    if (this.activeUnwatchedId) this.showInlineEpisodes(this.activeUnwatchedId);
+                } else {
+                    html = items.map(item => `
+                    <div class="tvm-movie-card ${this.activeUnwatchedId == item.id ? 'tvm-unwatched-active' : ''}">
+                        <div class="tvm-overlay-controls"><span class="dashicons dashicons-trash tvm-delete-item" data-id="${item.id}" style="color:#ff4d4d;"></span></div>
+                        <div class="tvm-poster-wrapper">
+                            <div class="tvm-badge-stats">${item.aired_unwatched_count}</div>
+                            <div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;">
+                                <img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">
+                            </div>
+                        </div>
+                        <h5 style="margin:8px 0; font-size:10px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>
+                    </div>`).join('');
+                    const finalHtml = `<div class="tvm-unwatched-grid">${html || '<p style="grid-column:1/-1; text-align:center; padding:40px;">No series found.</p>'}</div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:30px; border-top:2px solid #eee; padding-top:20px;"></div>`;
+                    $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(finalHtml);
+                    if (this.activeUnwatchedId) this.showInlineEpisodes(this.activeUnwatchedId);
+                }
             } else {
                 html = items.map(item => `
                 <div class="tvm-movie-card">
