@@ -1,10 +1,10 @@
 <?php
 /**
  * Post Type Registration & Admin UI Columns
- * Version 1.0.4 - Full Admin UI Activation
+ * Version 1.0.6 - Library Admin Filters (Type & Status)
  *
  * @package TV_Movie_Tracker
- * @version 1.0.4
+ * @version 1.0.6
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -37,17 +37,134 @@ class TVM_CPT {
 			'show_in_rest' => true,
 		) );
 
-		// Hook: Default Admin Sorting
-		add_action( 'pre_get_posts', array( $this, 'force_episode_order' ) );
-
-		// Hook: Custom Admin Columns for Episodes
+		// --- Hooks for Episodes Lister ---
 		add_filter( 'manage_tvm_episode_posts_columns', array( $this, 'add_episode_columns' ) );
 		add_action( 'manage_tvm_episode_posts_custom_column', array( $this, 'render_episode_columns' ), 10, 2 );
-		add_filter( 'manage_edit-tvm_episode_sortable_columns', array( $this, 'make_columns_sortable' ) );
-
-		// Hook: Admin Filtering
+		add_filter( 'manage_edit-tvm_episode_sortable_columns', array( $this, 'make_episode_columns_sortable' ) );
 		add_action( 'restrict_manage_posts', array( $this, 'add_episode_filters' ) );
 		add_action( 'parse_query', array( $this, 'filter_episodes_by_parent' ) );
+		add_action( 'pre_get_posts', array( $this, 'force_episode_order' ) );
+
+		// --- Hooks for Library Item Lister ---
+		add_filter( 'manage_tvm_item_posts_columns', array( $this, 'add_item_columns' ) );
+		add_action( 'manage_tvm_item_posts_custom_column', array( $this, 'render_item_columns' ), 10, 2 );
+		add_filter( 'manage_edit-tvm_item_sortable_columns', array( $this, 'make_item_columns_sortable' ) );
+		add_action( 'restrict_manage_posts', array( $this, 'add_library_filters' ) );
+		add_action( 'parse_query', array( $this, 'filter_library_by_meta' ) );
+	}
+
+	/**
+	 * Define columns for the Library Item lister.
+	 */
+	public function add_item_columns( $columns ) {
+		$new_columns = array(
+			'cb'         => $columns['cb'],
+			'title'      => $columns['title'],
+			'media_type' => __( 'Type', 'tvm-tracker' ),
+			'status'     => __( 'Status', 'tvm-tracker' ),
+			'date'       => $columns['date'],
+		);
+		return $new_columns;
+	}
+
+	/**
+	 * Render Library Item columns.
+	 */
+	public function render_item_columns( $column, $post_id ) {
+		switch ( $column ) {
+			case 'media_type':
+				$type = get_post_meta( $post_id, '_tvm_media_type', true );
+				$label = ( 'tv' === $type ) ? 'TV Show' : 'Movie';
+				$icon  = ( 'tv' === $type ) ? 'dashicons-desktop' : 'dashicons-video-alt3';
+				echo '<span class="dashicons ' . $icon . '" style="font-size:17px; vertical-align:text-bottom; margin-right:5px; color:#646970;"></span> ' . esc_html( $label );
+				break;
+
+			case 'status':
+				$status = get_post_meta( $post_id, '_tvm_status', true ) ?: 'Unknown';
+				$color  = ( in_array( strtolower( $status ), array( 'ended', 'canceled', 'released' ) ) ) ? '#d63638' : '#46b450';
+				
+				printf(
+					'<span style="background:%s; color:#fff; padding:3px 8px; border-radius:4px; font-size:10px; font-weight:700; text-transform:uppercase;">%s</span>',
+					$color,
+					esc_html( $status )
+				);
+				break;
+		}
+	}
+
+	/**
+	 * Make Library Item columns sortable.
+	 */
+	public function make_item_columns_sortable( $columns ) {
+		$columns['media_type'] = 'media_type';
+		$columns['status']     = 'status';
+		return $columns;
+	}
+
+	/**
+	 * Add dropdown filters for the Library Item list (Type and Status)
+	 */
+	public function add_library_filters( $post_type ) {
+		if ( 'tvm_item' !== $post_type ) {
+			return;
+		}
+
+		// 1. Filter by Media Type
+		$current_type = isset( $_GET['tvm_type_filter'] ) ? sanitize_text_field( $_GET['tvm_type_filter'] ) : '';
+		echo '<select name="tvm_type_filter">';
+		echo '<option value="">' . __( 'All Types', 'tvm-tracker' ) . '</option>';
+		printf( '<option value="movie" %s>%s</option>', selected( $current_type, 'movie', false ), __( 'Movies Only', 'tvm-tracker' ) );
+		printf( '<option value="tv" %s>%s</option>', selected( $current_type, 'tv', false ), __( 'TV Shows Only', 'tvm-tracker' ) );
+		echo '</select>';
+
+		// 2. Filter by Status (Dynamic from Meta)
+		global $wpdb;
+		$statuses = $wpdb->get_col( "SELECT DISTINCT meta_value FROM $wpdb->postmeta WHERE meta_key = '_tvm_status' AND meta_value != ''" );
+		
+		if ( ! empty( $statuses ) ) {
+			$current_status = isset( $_GET['tvm_status_filter'] ) ? sanitize_text_field( $_GET['tvm_status_filter'] ) : '';
+			echo '<select name="tvm_status_filter">';
+			echo '<option value="">' . __( 'All Statuses', 'tvm-tracker' ) . '</option>';
+			foreach ( $statuses as $status ) {
+				printf( '<option value="%s" %s>%s</option>', esc_attr( $status ), selected( $current_status, $status, false ), esc_html( $status ) );
+			}
+			echo '</select>';
+		}
+	}
+
+	/**
+	 * Modifies the admin query to respect Library Type and Status filters
+	 */
+	public function filter_library_by_meta( $query ) {
+		global $pagenow;
+		if ( ! is_admin() || 'edit.php' !== $pagenow || ! $query->is_main_query() || 'tvm_item' !== $query->get( 'post_type' ) ) {
+			return;
+		}
+
+		$meta_query = array();
+
+		if ( ! empty( $_GET['tvm_type_filter'] ) ) {
+			$meta_query[] = array(
+				'key'     => '_tvm_media_type',
+				'value'   => sanitize_text_field( $_GET['tvm_type_filter'] ),
+				'compare' => '=',
+			);
+		}
+
+		if ( ! empty( $_GET['tvm_status_filter'] ) ) {
+			$meta_query[] = array(
+				'key'     => '_tvm_status',
+				'value'   => sanitize_text_field( $_GET['tvm_status_filter'] ),
+				'compare' => '=',
+			);
+		}
+
+		if ( ! empty( $meta_query ) ) {
+			if ( count( $meta_query ) > 1 ) {
+				$meta_query['relation'] = 'AND';
+			}
+			$query->set( 'meta_query', $meta_query );
+		}
 	}
 
 	/**
@@ -97,9 +214,9 @@ class TVM_CPT {
 	}
 
 	/**
-	 * Make the Air Date and Parent columns sortable.
+	 * Make the Air Date and Parent columns sortable for episodes.
 	 */
-	public function make_columns_sortable( $columns ) {
+	public function make_episode_columns_sortable( $columns ) {
 		$columns['air_date'] = 'air_date';
 		$columns['parent']   = 'parent';
 		return $columns;
