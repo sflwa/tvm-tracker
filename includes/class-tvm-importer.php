@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.0.7 - Smart Upsert (Prevents Duplication)
+ * Version 2.0.9 - Refined Sync Logic with Stats Preservation
  *
  * @package TV_Movie_Tracker
- * @version 2.0.7
+ * @version 2.0.9
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -31,6 +31,62 @@ class TVM_Importer {
 		}
 	}
 
+	/**
+	 * Recalculates stats for a specific series and updates the flat table.
+	 * This is the core performance driver for large libraries.
+	 */
+	public function recalculate_series_stats( $post_id, $user_id = null ) {
+		global $wpdb;
+		if ( ! $user_id ) {
+			$user_id = get_current_user_id();
+		}
+		
+		if ( ! $user_id || ! $post_id ) return;
+
+		$today_str = current_time( 'Y-m-d' );
+		$table_progress = $wpdb->prefix . 'tvm_user_progress';
+		$table_stats    = $wpdb->prefix . 'tvm_series_stats';
+
+		// 1. Count Total Aired Episodes
+		$aired_count = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(p.ID) FROM {$wpdb->posts} p 
+			 JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id'
+			 JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_air_date'
+			 WHERE p.post_type = 'tvm_episode' AND m1.meta_value = %d AND m2.meta_value <= %s",
+			$post_id, $today_str
+		) );
+
+		// 2. Count Watched Episodes
+		$watched_count = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(*) FROM $table_progress 
+			 WHERE user_id = %d AND item_id = %d AND episode_id > 0 AND watched_at IS NOT NULL",
+			$user_id, $post_id
+		) );
+
+		// 3. Count Upcoming (Future) Episodes
+		$upcoming_count = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(p.ID) FROM {$wpdb->posts} p 
+			 JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id'
+			 JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_air_date'
+			 WHERE p.post_type = 'tvm_episode' AND m1.meta_value = %d AND m2.meta_value > %s",
+			$post_id, $today_str
+		) );
+
+		$unwatched_count = max( 0, $aired_count - $watched_count );
+
+		// 4. Upsert into Stats Table (Flat Summary)
+		$wpdb->query( $wpdb->prepare(
+			"INSERT INTO $table_stats (user_id, item_id, watched_count, unwatched_count, upcoming_count, last_updated)
+			 VALUES (%d, %d, %d, %d, %d, %s)
+			 ON DUPLICATE KEY UPDATE 
+			 watched_count = VALUES(watched_count), 
+			 unwatched_count = VALUES(unwatched_count), 
+			 upcoming_count = VALUES(upcoming_count), 
+			 last_updated = VALUES(last_updated)",
+			$user_id, $post_id, $watched_count, $unwatched_count, $upcoming_count, current_time('mysql')
+		) );
+	}
+
 	public function handle_delete() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
@@ -38,8 +94,12 @@ class TVM_Importer {
 
 		global $wpdb;
 		$user_id = get_current_user_id();
-		$table = $wpdb->prefix . 'tvm_user_progress';
-		$wpdb->delete( $table, array( 'user_id' => $user_id, 'item_id' => $post_id ) );
+		
+		// Remove from Progress Table
+		$wpdb->delete( $wpdb->prefix . 'tvm_user_progress', array( 'user_id' => $user_id, 'item_id' => $post_id ) );
+		
+		// Remove from Stats Summary Table
+		$wpdb->delete( $wpdb->prefix . 'tvm_series_stats', array( 'user_id' => $user_id, 'item_id' => $post_id ) );
 		
 		wp_send_json_success( 'Item removed from your vault.' );
 	}
@@ -75,7 +135,12 @@ class TVM_Importer {
 		}
 
 		$this->ensure_user_progress( $post_id, $type );
-		$this->sync_tvmaze_metadata( $post_id, get_post_meta( $post_id, '_tvm_tvdb_id', true ) );
+		
+		if ( 'tv' === $type ) {
+			$this->sync_tvmaze_metadata( $post_id, get_post_meta( $post_id, '_tvm_tvdb_id', true ) );
+			$this->recalculate_series_stats( $post_id ); 
+		}
+		
 		$this->sync_watchmode_data( $post_id );
 
 		wp_send_json_success( array( 'post_id' => $post_id ) );
@@ -86,15 +151,32 @@ class TVM_Importer {
 		$post_id = absint( $_POST['post_id'] );
 		$this->sync_tvmaze_metadata( $post_id, get_post_meta( $post_id, '_tvm_tvdb_id', true ) );
 		$this->sync_watchmode_data( $post_id );
+		$this->recalculate_series_stats( $post_id ); 
 		wp_send_json_success( "Manual Sync Complete." );
 	}
 
+	/**
+	 * WEEKLY SYNC LOGIC (v2.0.9)
+	 * 1. Sync all active/returning shows (Not Ended/Canceled).
+	 * 2. Sync older shows that still have unwatched episodes.
+	 */
 	public function run_weekly_sync() {
-		$shows = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1, 'meta_key' => '_tvm_media_type', 'meta_value' => 'tv' ) );
+		$shows = get_posts( array( 
+			'post_type'      => 'tvm_item', 
+			'posts_per_page' => -1, 
+			'meta_key'       => '_tvm_media_type', 
+			'meta_value'     => 'tv' 
+		) );
+
 		foreach ( $shows as $show ) {
-			$this->sync_tvmaze_metadata( $show->ID, get_post_meta( $show->ID, '_tvm_tvdb_id', true ) );
-			if ( $this->needs_watchmode_sync( $show->ID ) ) {
+			$status    = strtolower( get_post_meta( $show->ID, '_tvm_status', true ) );
+			$is_active = ! in_array( $status, array( 'ended', 'canceled' ) );
+			
+			// Rule: Sync if currently airing OR has unwatched content remaining
+			if ( $is_active || ! $this->is_item_fully_watched( $show->ID, 'tv' ) ) {
+				$this->sync_tvmaze_metadata( $show->ID, get_post_meta( $show->ID, '_tvm_tvdb_id', true ) );
 				$this->sync_watchmode_data( $show->ID );
+				$this->recalculate_series_stats( $show->ID );
 			}
 		}
 	}
@@ -105,6 +187,9 @@ class TVM_Importer {
 			$type = get_post_meta( $item->ID, '_tvm_media_type', true );
 			if ( ! $this->is_item_fully_watched( $item->ID, $type ) ) {
 				$this->sync_watchmode_data( $item->ID );
+			}
+			if ( 'tv' === $type ) {
+				$this->recalculate_series_stats( $item->ID );
 			}
 		}
 	}
@@ -153,16 +238,11 @@ class TVM_Importer {
 		update_post_meta( $post_id, '_tvm_last_sync', current_time( 'mysql' ) );
 	}
 
-	/**
-	 * SMART UPSERT: Efficiently finds existing episode by parent/season/number 
-	 * to prevent duplication while updating metadata.
-	 */
 	private function upsert_episode( $parent_id, $ep ) {
 		global $wpdb;
 		$s = absint($ep['season']); 
 		$n = absint($ep['number']);
 
-		// Optimized lookup: Find episode ID where all 3 keys match in one go
 		$episode_id = $wpdb->get_var( $wpdb->prepare(
 			"SELECT p.ID FROM {$wpdb->posts} p
 			 INNER JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id'
@@ -186,7 +266,6 @@ class TVM_Importer {
 				'post_type'    => 'tvm_episode' 
 			) );
 		} else {
-			// Update existing to ensure title/summary are fresh
 			wp_update_post( array(
 				'ID'           => $episode_id,
 				'post_title'   => $title,
@@ -200,9 +279,6 @@ class TVM_Importer {
 		update_post_meta( $episode_id, '_tvm_air_date', $ep['airdate'] );
 	}
 
-	/**
-	 * Updates sources using the same smart lookup logic
-	 */
 	private function update_ep_sources( $parent_id, $wm_ep ) {
 		global $wpdb;
 		$s = absint($wm_ep['season_number']); 
