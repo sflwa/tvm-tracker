@@ -1,7 +1,7 @@
 <?php
 /**
  * Frontend Shortcodes
- * Version 1.9.2 - Stats Page Integration
+ * Version 1.9.3 - Search List View & Stats Integration
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -121,7 +121,14 @@ class TVM_Shortcodes {
 						<input type="text" id="tvm-frontend-search-input" placeholder="Search TMDb..." style="flex:1; padding:12px; border:1px solid #ddd; border-radius:8px;">
 						<button id="tvm-frontend-search-btn" class="button button-primary" style="padding:0 25px; border-radius:8px; font-weight:700;">Search</button>
 					</div>
-					<div id="tvm-frontend-results" class="tvm-locked-grid"></div>
+
+                    <div class="tvm-search-toggles" style="margin-bottom: 20px; display: flex; gap: 10px;">
+                        <button class="tvm-search-filter active" data-type="all">All Results</button>
+                        <button class="tvm-search-filter" data-type="tv">TV Shows</button>
+                        <button class="tvm-search-filter" data-type="movie">Movies</button>
+                    </div>
+
+					<div id="tvm-frontend-results" style="display: flex; flex-direction: column; gap: 12px; width: 100%;"></div>
 				</section>
 
                 <section id="tvm-view-stats" style="display:none; padding:20px 0;">
