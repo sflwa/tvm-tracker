@@ -1,7 +1,7 @@
 <?php
 /**
  * Frontend Shortcodes
- * Version 1.9.1 - Calendar Button Integration
+ * Version 1.9.2 - Stats Page Integration
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -22,6 +22,7 @@ class TVM_Shortcodes {
 			'class-tvm-movie-details.php',
 			'class-tvm-tv-handler.php',
 			'class-tvm-tv-details.php',
+			'class-tvm-stats-handler.php',
 		);
 
 		foreach ( $includes as $file ) {
@@ -42,6 +43,7 @@ class TVM_Shortcodes {
 		if ( class_exists( 'TVM_Movie_Details' ) ) { new TVM_Movie_Details(); }
 		if ( class_exists( 'TVM_TV_Handler' ) ) { new TVM_TV_Handler(); } 
 		if ( class_exists( 'TVM_TV_Details' ) ) { new TVM_TV_Details(); }
+		if ( class_exists( 'TVM_Stats_Handler' ) ) { new TVM_Stats_Handler(); }
 	}
 
 	public function render_app() {
@@ -50,14 +52,10 @@ class TVM_Shortcodes {
 		}
 
 		wp_enqueue_style( 'dashicons' );
-		
-		// 1. Enqueue specialized modules FIRST
 		wp_enqueue_script( 'tvm-movie-js', TVM_URL . 'assets/js/tvm-movie.js', array( 'jquery' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-tv-js', TVM_URL . 'assets/js/tvm-tv.js', array( 'jquery' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-search-js', TVM_URL . 'assets/js/tvm-search.js', array( 'jquery' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-settings-js', TVM_URL . 'assets/js/tvm-settings.js', array( 'jquery' ), TVM_VERSION, true );
-
-		// 2. Enqueue Core Orchestrator LAST, depending on all modules
 		wp_enqueue_script( 'tvm-core-js', TVM_URL . 'assets/js/tvm-core.js', array( 'jquery', 'tvm-movie-js', 'tvm-tv-js', 'tvm-search-js', 'tvm-settings-js' ), TVM_VERSION, true );
 
 		wp_localize_script( 'tvm-core-js', 'tvm_app', array(
@@ -80,6 +78,7 @@ class TVM_Shortcodes {
 				<ul style="list-style: none; padding: 0; display: flex; gap: 20px; border-bottom: 1px solid #eee; margin:0;">
 					<li><a href="#" class="tvm-nav-link active" data-tab="watchlist">My Vault</a></li>
 					<li><a href="#" class="tvm-nav-link" data-tab="search">Search & Add</a></li>
+					<li><a href="#" class="tvm-nav-link" data-tab="stats">My Stats</a></li>
 					<li><a href="#" class="tvm-nav-link" data-tab="settings">My Settings</a></li>
 				</ul>
 			</nav>
@@ -124,6 +123,12 @@ class TVM_Shortcodes {
 					</div>
 					<div id="tvm-frontend-results" class="tvm-locked-grid"></div>
 				</section>
+
+                <section id="tvm-view-stats" style="display:none; padding:20px 0;">
+                    <div id="tvm-stats-container">
+                        <p style="text-align:center; padding:40px;">Calculating stats...</p>
+                    </div>
+                </section>
 
 				<section id="tvm-view-settings" style="display:none;">
 					<div id="tvm-settings-form-container">
