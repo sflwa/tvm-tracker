@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.6.3 - Layout Fix for Unwatched Dropdown
+ * Version: 1.7.3 - UI Update: Detail page with poster, status, and stats
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -120,7 +120,6 @@ jQuery(function($) {
                         $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_watchlist', nonce: tvm_app.nonce }, (res) => {
                             if (res.success) {
                                 window.tvm_tv_cache = res.data.items;
-                                this.updateStats(res.data.stats);
                                 this.showInlineEpisodes(this.activeUnwatchedId);
                             }
                         });
@@ -179,32 +178,25 @@ jQuery(function($) {
                 TVM_Core.hideLoading();
                 if (res.success) {
                     window.tvm_tv_cache = res.data.items;
-                    this.updateStats(res.data.stats);
                     this.applyFilter();
                 }
             });
         },
 
-        updateStats: function(s) {
-            if (!s) return;
-            const html = `TV: ${s.series} Shows • ${s.episodes} Episodes • ${s.watched} Watched • ${s.percent}%`;
-            $('#tvm-stats-display').html(html);
-        },
-
         applyFilter: function() {
             const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
             const search = $('#tvm-vault-search-input').val().toLowerCase();
-            const streamOnly = $('#tvm-stream-only-toggle').is(':checked');
+            const streamOnly = $('#tvm-stream-only-toggle').is(':checked'); 
             let items = [...(window.tvm_tv_cache || [])];
             
-            if (filter === 'watched') items = items.filter(i => i.ep_watched > 0);
-            else if (filter === 'released') items = items.filter(i => i.has_aired_unwatched === true);
+            if (filter === 'released') items = items.filter(i => i.has_aired_unwatched === true);
             else if (filter === 'upcoming') items = items.filter(i => i.has_upcoming === true);
+            else if (filter === 'watched') items = items.filter(i => i.aired_unwatched_count === 0);
 
             if (streamOnly) {
                 items = items.filter(i => i.has_streaming === true);
             }
-            
+
             if (search) items = items.filter(i => i.title.toLowerCase().includes(search));
 
             items.sort((a, b) => a.title.localeCompare(b.title));
@@ -295,43 +287,60 @@ jQuery(function($) {
         },
 
         render: function(items, isUnwatchedView) {
-            let html = '';
-            if (isUnwatchedView) {
-                if ($(window).width() < 800) {
-                    const selectedAttr = (id) => (this.activeUnwatchedId == id) ? 'selected' : '';
-                    html += `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div class="tvm-unwatched-nav-container"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}" ${selectedAttr(i.id)}>(${i.aired_unwatched_count}) ${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:20px;"></div></div>`;
-                    $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(html);
-                    if (this.activeUnwatchedId) this.showInlineEpisodes(this.activeUnwatchedId);
-                } else {
-                    html = items.map(item => `
+            const currentShows = items.filter(i => ['Returning Series', 'Unknown'].includes(i.status));
+            const futureShows  = items.filter(i => ['In Production'].includes(i.status));
+            const oldShows     = items.filter(i => ['Ended', 'Canceled'].includes(i.status));
+
+            const buildGrid = (groupItems) => {
+                if (groupItems.length === 0) return '';
+                return groupItems.map(item => {
+                    const posterContent = (item.poster_path && item.poster_path !== "") 
+                        ? `<img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">`
+                        : `<div class="tvm-placeholder-poster"><span class="dashicons dashicons-desktop"></span><span class="placeholder-text">No Poster</span></div>`;
+
+                    const badgeHtml = isUnwatchedView ? `<div class="tvm-badge-stats">${item.aired_unwatched_count}</div>` : '';
+
+                    return `
                     <div class="tvm-movie-card ${this.activeUnwatchedId == item.id ? 'tvm-unwatched-active' : ''}">
                         <div class="tvm-overlay-controls"><span class="dashicons dashicons-trash tvm-delete-item" data-id="${item.id}" style="color:#ff4d4d;"></span></div>
                         <div class="tvm-poster-wrapper">
-                            <div class="tvm-badge-stats">${item.aired_unwatched_count}</div>
+                            ${badgeHtml}
                             <div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;">
-                                <img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">
+                                ${posterContent}
                             </div>
                         </div>
                         <h5 style="margin:8px 0; font-size:10px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>
-                    </div>`).join('');
-                    const finalHtml = `<div class="tvm-unwatched-grid">${html || '<p style="grid-column:1/-1; text-align:center; padding:40px;">No series found.</p>'}</div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:30px; border-top:2px solid #eee; padding-top:20px;"></div>`;
-                    $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(finalHtml);
-                    if (this.activeUnwatchedId) this.showInlineEpisodes(this.activeUnwatchedId);
-                }
+                    </div>`;
+                }).join('');
+            };
+
+            const buildSection = (title, groupItems, count) => {
+                if (groupItems.length === 0) return '';
+                return `
+                <div class="tvm-section-group" style="margin-bottom:40px; clear:both;">
+                    <h3 style="border-bottom:2px solid #eee; padding-bottom:10px; margin-bottom:20px; font-size:18px; color:#2271b1; display:flex; justify-content:space-between; align-items:center;">
+                        ${title} <span style="font-size:12px; background:#e7f3ff; color:#2271b1; padding:2px 10px; border-radius:12px;">${count}</span>
+                    </h3>
+                    <div class="tvm-locked-grid">${buildGrid(groupItems)}</div>
+                </div>`;
+            };
+
+            let finalHtml = '';
+            if (isUnwatchedView && $(window).width() < 800) {
+                const selectedAttr = (id) => (this.activeUnwatchedId == id) ? 'selected' : '';
+                finalHtml = `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div class="tvm-unwatched-nav-container"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}" ${selectedAttr(i.id)}>(${i.aired_unwatched_count}) ${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:20px;"></div></div>`;
             } else {
-                html = items.map(item => `
-                <div class="tvm-movie-card">
-                    <div class="tvm-overlay-controls"><span class="dashicons dashicons-trash tvm-delete-item" data-id="${item.id}" style="color:#ff4d4d;"></span></div>
-                    <div class="tvm-poster-wrapper">
-                        <div class="tvm-badge-stats">${item.ep_watched}/${item.ep_count}</div>
-                        <div class="tvm-tv-trigger" data-id="${item.id}" style="cursor:pointer;">
-                            <img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; display:block;">
-                        </div>
-                    </div>
-                    <h5 style="margin:8px 0; font-size:11px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>
-                </div>`).join('');
-                $('#tvm-watchlist-grid').addClass('tvm-locked-grid').html(html || '<p style="grid-column:1/-1; text-align:center; padding:40px;">No series found.</p>');
+                finalHtml += buildSection('Current Shows', currentShows, currentShows.length);
+                finalHtml += buildSection('Future Shows', futureShows, futureShows.length);
+                finalHtml += buildSection('Old Shows', oldShows, oldShows.length);
+
+                if (isUnwatchedView) {
+                    finalHtml += `<div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:30px; border-top:2px solid #eee; padding-top:20px;"></div>`;
+                }
             }
+
+            $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(finalHtml || '<p style="text-align:center; padding:40px;">No series found.</p>');
+            if (isUnwatchedView && this.activeUnwatchedId) this.showInlineEpisodes(this.activeUnwatchedId);
         },
 
         showInlineEpisodes: function(id) {
@@ -346,9 +355,57 @@ jQuery(function($) {
 
         showSeriesDetails: function(id) {
             const item = window.tvm_tv_cache.find(i => i.id == id);
+            if (!item) return;
+
             $('#tvm-watchlist-grid, .tvm-filters-container').hide();
             $('#tvm-tv-detail-view').show();
-            $('#tvm-series-content').html(`<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;"><div style="display:flex; align-items:baseline; gap:12px;"><h3 style="margin:0;">${item.title}</h3><span style="font-size:12px; color:#999; font-style:italic;">Last Sync: ${item.last_sync}</span></div><button id="tvm-sync-episodes" class="button button-primary" data-id="${id}">Sync Episodes</button></div><div id="tvm-season-nav" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:25px; border-bottom:1px solid #eee; padding-bottom:15px;"></div><div id="tvm-episode-results">Loading episodes...</div>`);
+
+            const posterUrl = item.poster_path ? `https://image.tmdb.org/t/p/w342${item.poster_path}` : '';
+            const statusColor = (['Ended', 'Canceled'].includes(item.status)) ? '#d63638' : '#46b450';
+            const totalAired = item.watched_count + item.aired_unwatched_count;
+            const progressPercent = totalAired > 0 ? Math.round((item.watched_count / totalAired) * 100) : 0;
+
+            const headerHtml = `
+            <div class="tvm-series-detail-header" style="display:flex; gap:30px; margin-bottom:30px; background:#fff; padding:25px; border-radius:12px; border:1px solid #eee; box-shadow:0 4px 6px rgba(0,0,0,0.02);">
+                <div class="tvm-detail-poster" style="flex:0 0 180px;">
+                    ${item.poster_path 
+                        ? `<img src="${posterUrl}" style="width:100%; border-radius:8px; display:block; box-shadow:0 10px 20px rgba(0,0,0,0.15);">`
+                        : `<div class="tvm-placeholder-poster" style="height:270px;"><span class="dashicons dashicons-desktop" style="font-size:48px;"></span></div>`}
+                </div>
+                <div class="tvm-detail-info" style="flex:1;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:15px;">
+                        <div>
+                            <h2 style="margin:0 0 10px 0; font-size:28px; color:#1d2327;">${item.title}</h2>
+                            <span style="background:${statusColor}; color:#fff; padding:4px 12px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">${item.status}</span>
+                        </div>
+                        <button id="tvm-sync-episodes" class="button button-primary" data-id="${id}" style="border-radius:6px; font-weight:600;">Sync Metadata</button>
+                    </div>
+                    
+                    <div class="tvm-detail-stats" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:15px; margin-top:20px; border-top:1px solid #f0f0f0; padding-top:20px;">
+                        <div class="stat-box">
+                            <span style="display:block; font-size:10px; color:#999; text-transform:uppercase; font-weight:700; margin-bottom:5px;">Progress</span>
+                            <strong style="font-size:18px; color:#2271b1;">${progressPercent}%</strong>
+                        </div>
+                        <div class="stat-box">
+                            <span style="display:block; font-size:10px; color:#999; text-transform:uppercase; font-weight:700; margin-bottom:5px;">Watched</span>
+                            <strong style="font-size:18px; color:#46b450;">${item.watched_count}</strong>
+                        </div>
+                        <div class="stat-box">
+                            <span style="display:block; font-size:10px; color:#999; text-transform:uppercase; font-weight:700; margin-bottom:5px;">Remaining</span>
+                            <strong style="font-size:18px; color:#d63638;">${item.aired_unwatched_count}</strong>
+                        </div>
+                        <div class="stat-box">
+                            <span style="display:block; font-size:10px; color:#999; text-transform:uppercase; font-weight:700; margin-bottom:5px;">Upcoming</span>
+                            <strong style="font-size:18px; color:#dba617;">${item.upcoming_count}</strong>
+                        </div>
+                    </div>
+                    <div style="margin-top:15px; font-size:11px; color:#bbb; font-style:italic;">Last Library Sync: ${item.last_sync}</div>
+                </div>
+            </div>
+            <div id="tvm-season-nav" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:25px; border-bottom:1px solid #eee; padding-bottom:15px;"></div>
+            <div id="tvm-episode-results">Loading episodes...</div>`;
+
+            $('#tvm-series-content').html(headerHtml);
             this.loadEpisodes(id);
         },
 
