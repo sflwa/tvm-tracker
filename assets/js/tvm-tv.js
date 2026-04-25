@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.7.3 - UI Update: Detail page with poster, status, and stats
+ * Version: 1.7.4 - UI Update: Per-episode progress bar integration
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
@@ -97,7 +97,9 @@ jQuery(function($) {
                 
                 $btn.prop('disabled', true).text('Processing...');
                 for (let i = 0; i < unwatchedItems.length; i++) {
-                    await $.post(tvm_app.ajax_url, { action: 'tvm_toggle_episode_watched', episode_id: $(unwatchedItems[i]).data('id'), watched: 'true', nonce: tvm_app.nonce });
+                    const epId = $(unwatchedItems[i]).data('id');
+                    $(`#ep-row-${epId}`).addClass('is-updating'); // Trigger individual progress bar
+                    await $.post(tvm_app.ajax_url, { action: 'tvm_toggle_episode_watched', episode_id: epId, watched: 'true', nonce: tvm_app.nonce });
                 }
                 
                 this.load(); 
@@ -107,9 +109,15 @@ jQuery(function($) {
 
             $(document).on('click', '.tvm-ep-watch', (e) => {
                 const $btn = $(e.currentTarget);
+                const epId = $btn.data('id');
+                const $row = $(`#ep-row-${epId}`);
+
+                // Trigger individual row progress bar animation
+                $row.addClass('is-updating');
+
                 $.post(tvm_app.ajax_url, { 
                     action: 'tvm_toggle_episode_watched', 
-                    episode_id: $btn.data('id'), 
+                    episode_id: epId, 
                     watched: $btn.data('watched'), 
                     nonce: tvm_app.nonce 
                 }, () => {
@@ -158,7 +166,7 @@ jQuery(function($) {
                 const $btn = $(e.currentTarget);
                 $btn.prop('disabled', true).text('Syncing...');
                 $.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: $btn.data('id'), nonce: tvm_app.nonce }, (res) => {
-                    $btn.prop('disabled', false).text('Sync Episodes');
+                    $btn.prop('disabled', false).text('Sync Metadata');
                     if (res.success) { alert(res.data); this.load(); this.loadEpisodes($btn.data('id')); }
                 });
             });
@@ -289,7 +297,7 @@ jQuery(function($) {
         render: function(items, isUnwatchedView) {
             const currentShows = items.filter(i => ['Returning Series', 'Unknown'].includes(i.status));
             const futureShows  = items.filter(i => ['In Production'].includes(i.status));
-            const oldShows     = items.filter(i => ['Ended', 'Canceled'].includes(i.status));
+            const oldShows      = items.filter(i => ['Ended', 'Canceled'].includes(i.status));
 
             const buildGrid = (groupItems) => {
                 if (groupItems.length === 0) return '';
@@ -425,7 +433,21 @@ jQuery(function($) {
                         contentHtml += `<div id="tvm-season-group-${sNum}" class="tvm-season-content-group" style="display:${isActive ? 'flex' : 'none'}; flex-direction:column; gap:12px;"><div style="display:flex; justify-content:flex-end; margin-bottom:10px;"><button class="tvm-mark-season-watched button button-primary button-small" style="font-size:10px; font-weight:700;">Mark Full Season Watched</button></div>`;
                         grouped[sNum].forEach(ep => {
                             const statusColor = ep.is_watched ? '#46b450' : '#ddd';
-                            contentHtml += `<div class="tvm-episode-row" style="border-left-color: ${statusColor};"><div style="display:flex; justify-content:space-between; align-items:flex-start;"><div style="flex:1;"><div style="font-weight:800; color:#1d2327; font-size:16px;">E${ep.number} - ${ep.title.replace(/^S\d+E\d+\s-\s/i, '')}</div><div style="font-size:12px; color:#999; margin-top:4px;">Air Date: ${ep.air_date}</div></div><div style="display:flex; align-items:center; gap:15px;"><div class="tvm-episode-sources" style="display:flex; gap:6px;">${ep.is_future ? '<span style="font-size:10px; color:#2271b1; background:#e7f3ff; padding:4px 8px; border-radius:4px; font-weight:700;">Upcoming</span>' : this.renderSources(ep.sources)}</div>${ep.is_future ? '<span class="dashicons dashicons-clock" style="color:#bbb; font-size:24px;"></span>' : `<span class="dashicons ${ep.is_watched ? 'dashicons-visibility' : 'dashicons-hidden'} tvm-ep-watch" data-id="${ep.id}" data-watched="${!ep.is_watched}" style="cursor:pointer; color:${statusColor}; font-size:24px;"></span>`}</div></div><div class="tvm-ep-overview" style="margin-top:12px; font-size:13px; line-height:1.5; color:#666;">${ep.overview || 'No description available.'}</div></div>`;
+                            contentHtml += `
+                            <div class="tvm-episode-row" id="ep-row-${ep.id}" style="border-left-color: ${statusColor};">
+                                <div class="tvm-ep-row-progress"></div>
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; position:relative; z-index:2;">
+                                    <div style="flex:1;">
+                                        <div style="font-weight:800; color:#1d2327; font-size:16px;">E${ep.number} - ${ep.title.replace(/^S\d+E\d+\s-\s/i, '')}</div>
+                                        <div style="font-size:12px; color:#999; margin-top:4px;">Air Date: ${ep.air_date}</div>
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:15px;">
+                                        <div class="tvm-episode-sources" style="display:flex; gap:6px;">${ep.is_future ? '<span style="font-size:10px; color:#2271b1; background:#e7f3ff; padding:4px 8px; border-radius:4px; font-weight:700;">Upcoming</span>' : this.renderSources(ep.sources)}</div>
+                                        ${ep.is_future ? '<span class="dashicons dashicons-clock" style="color:#bbb; font-size:24px;"></span>' : `<span class="dashicons ${ep.is_watched ? 'dashicons-visibility' : 'dashicons-hidden'} tvm-ep-watch" data-id="${ep.id}" data-watched="${!ep.is_watched}" style="cursor:pointer; color:${statusColor}; font-size:24px;"></span>`}
+                                    </div>
+                                </div>
+                                <div class="tvm-ep-overview" style="margin-top:12px; font-size:13px; line-height:1.5; color:#666; position:relative; z-index:2;">${ep.overview || 'No description available.'}</div>
+                            </div>`;
                         });
                         contentHtml += `</div>`;
                     });
