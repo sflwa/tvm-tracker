@@ -3,7 +3,7 @@
  * Plugin Name:       TV & Movie Tracker
  * Plugin URI:        https://sflwa.com/
  * Description:       A premium personal library for tracking TV shows and Movies.
- * Version:           2.0.0
+ * Version:           2.1.0
  * Author:            South Florida Web Advisors
  * License:           GPLv2 or later
  * Text Domain:       tvm-tracker
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'TVM_VERSION', '2.0.0' );
+define( 'TVM_VERSION', '2.1.0' );
 define( 'TVM_PATH', plugin_dir_path( __FILE__ ) );
 define( 'TVM_URL', plugin_dir_url( __FILE__ ) );
 
@@ -44,7 +44,13 @@ final class TVM_Tracker {
 				$cpt = new TVM_CPT();
 				$cpt->register_post_types();
 			}
+            
+            // Register Custom Rewrite Rules for Dedicated Views
+            $this->register_rewrite_rules();
 		});
+
+        // Add query variables to WordPress
+        add_filter( 'query_vars', array( $this, 'register_query_vars' ) );
 
 		if ( class_exists( 'TVM_Admin_Search' ) ) {
 			new TVM_Admin_Search();
@@ -60,7 +66,31 @@ final class TVM_Tracker {
 
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		register_activation_hook( __FILE__, array( $this, 'activate_plugin' ) );
+        
+        // Flush rewrites on activation
+        register_activation_hook( __FILE__, 'flush_rewrite_rules' );
 	}
+
+    /**
+     * Register custom URL segments for dedicated views
+     */
+    public function register_rewrite_rules() {
+        add_rewrite_rule( 
+        'test/tv-unwatched/?$', 
+        'index.php?page_id=20840&tvm_view=tv-unwatched', 
+        'top' 
+    );
+		
+        // Future endpoints can be added here (e.g., tv-upcoming, tv-calendar)
+    }
+
+    /**
+     * Add tvm_view to the allowed WordPress query variables
+     */
+    public function register_query_vars( $vars ) {
+        $vars[] = 'tvm_view';
+        return $vars;
+    }
 
 	/**
 	 * Define custom monthly interval for WP-Cron
@@ -82,17 +112,23 @@ final class TVM_Tracker {
 		wp_enqueue_script( 'tvm-tv-js', TVM_URL . 'assets/js/tvm-tv.js', array( 'tvm-core-js' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-search-js', TVM_URL . 'assets/js/tvm-search.js', array( 'jquery', 'tvm-core-js' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-settings-js', TVM_URL . 'assets/js/tvm-settings.js', array( 'jquery', 'tvm-core-js' ), TVM_VERSION, true );
+
+        // Conditionally load the new dedicated Unwatched script
+        if ( get_query_var( 'tvm_view' ) === 'tv-unwatched' ) {
+            wp_enqueue_script( 'tvm-tv-unwatched-js', TVM_URL . 'assets/js/tvm-tv-unwatched.js', array( 'jquery', 'tvm-core-js' ), TVM_VERSION, true );
+        }
 		
 		wp_localize_script( 'tvm-core-js', 'tvm_app', array(
 			'ajax_url' => admin_url( 'admin-ajax.php' ),
 			'nonce'    => wp_create_nonce( 'tvm_import_nonce' ),
+            'current_view' => get_query_var( 'tvm_view' ),
 		));
 	}
 
 	private function includes() {
 		require_once TVM_PATH . 'includes/class-tvm-settings.php';
 		require_once TVM_PATH . 'includes/class-tvm-api-tmdb.php';
-		require_once TVM_PATH . 'includes/class-tvm-api-tvmaze.php'; // FIXED: Corrected path typo from TV_PATH to TVM_PATH
+		require_once TVM_PATH . 'includes/class-tvm-api-tvmaze.php'; 
 		require_once TVM_PATH . 'includes/class-tvm-api-watchmode.php';
 		require_once TVM_PATH . 'includes/class-tvm-shortcodes.php';
 		require_once TVM_PATH . 'includes/class-tvm-cpt.php';
@@ -103,6 +139,11 @@ final class TVM_Tracker {
 		require_once TVM_PATH . 'includes/class-tvm-tv-handler.php';
 		require_once TVM_PATH . 'includes/class-tvm-tv-details.php';
 		require_once TVM_PATH . 'includes/class-tvm-importer.php';
+        
+        // New Surgical Handler
+        if ( file_exists( TVM_PATH . 'includes/class-tvm-tv-unwatched-handler.php' ) ) {
+            require_once TVM_PATH . 'includes/class-tvm-tv-unwatched-handler.php';
+        }
 	}
 
 	public function activate_plugin() {
@@ -127,6 +168,10 @@ final class TVM_Tracker {
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
 		update_option( 'tvm_version', TVM_VERSION );
+        
+        // Ensure rewrites are flushed immediately upon activation
+        $this->register_rewrite_rules();
+        flush_rewrite_rules();
 	}
 }
 
