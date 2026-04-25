@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX TV Watchlist Handler
- * Version 1.0.8 - Calendar Overview Support
+ * Version 1.1.6 - Enhanced Data for Detail View
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -74,113 +74,77 @@ class TVM_TV_Handler {
 		global $wpdb;
 		$user_id = get_current_user_id();
 		$progress_table = $wpdb->prefix . 'tvm_user_progress';
-
-		$user_shows = $wpdb->get_results(
-			$wpdb->prepare( 
-                "SELECT item_id FROM $progress_table 
-                 WHERE user_id = %d AND media_type = 'tv' AND season_number = 0", 
-                $user_id 
-            ),
-			OBJECT_K
-		);
-
-		if ( empty( $user_shows ) ) {
-			wp_send_json_success( array( 'items' => array(), 'stats' => array('series'=>0, 'episodes'=>0, 'watched'=>0, 'percent'=>0) ) );
-		}
+		$stats_table    = $wpdb->prefix . 'tvm_series_stats';
 
 		$query = new WP_Query( array(
 			'post_type'      => 'tvm_item',
-			'post__in'       => array_keys( $user_shows ),
+			'post__in'       => $wpdb->get_col( $wpdb->prepare( "SELECT item_id FROM $progress_table WHERE user_id = %d AND media_type = 'tv' AND season_number = 0", $user_id ) ) ?: array(0),
 			'posts_per_page' => -1,
 		) );
 
 		$watchlist = array();
-		$today_str = current_time( 'Y-m-d' );
 		$user_services  = get_user_meta( $user_id, 'tvm_user_services', true ) ?: array();
 		$primary_region = strtoupper( get_user_meta( $user_id, 'tvm_primary_region', true ) ?: 'US' );
-
-        $tv_ep_total = 0;
-        $tv_ep_watched = 0;
 
 		if ( $query->have_posts() ) {
 			while ( $query->have_posts() ) {
 				$query->the_post();
 				$id = get_the_ID();
 
-				$ep_data = $wpdb->get_results( $wpdb->prepare( 
-					"SELECT p.ID, m1.meta_value as air_date, m2.meta_value as sources 
-					 FROM {$wpdb->posts} p
-					 LEFT JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_air_date'
-					 LEFT JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_episode_sources'
-					 WHERE p.post_type = 'tvm_episode' 
-					 AND p.ID IN (SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_parent_id' AND meta_value = %d)", 
-					$id 
+				$stats = $wpdb->get_row( $wpdb->prepare(
+					"SELECT watched_count, unwatched_count, upcoming_count FROM $stats_table WHERE user_id = %d AND item_id = %d",
+					$user_id, $id
 				) );
 
-				$ep_count = count( $ep_data );
-				$ep_watched_count = 0;
-				$aired_unwatched_count = 0;
-				$has_upcoming = false;
-				$has_unwatched_streaming = false;
+				$watched   = (int) ( $stats->watched_count ?? 0 );
+				$unwatched = (int) ( $stats->unwatched_count ?? 0 );
+				$upcoming  = (int) ( $stats->upcoming_count ?? 0 );
 
-				if ( $ep_count > 0 ) {
-                    $tv_ep_total += $ep_count;
-					foreach ( $ep_data as $ep ) {
-						$is_future = ( $ep->air_date && $ep->air_date > $today_str );
-						$is_watched = $wpdb->get_var( $wpdb->prepare(
-							"SELECT id FROM $progress_table WHERE user_id = %d AND episode_id = %d AND watched_at IS NOT NULL",
-							$user_id, $ep->ID
-						) );
+				// Stream Only Logic
+				$has_streaming = false;
+				if ( $unwatched > 0 ) {
+					$ep_sources = $wpdb->get_results( $wpdb->prepare( 
+						"SELECT m.meta_value FROM {$wpdb->postmeta} m 
+						 JOIN {$wpdb->posts} p ON m.post_id = p.ID 
+						 WHERE p.post_type = 'tvm_episode' 
+						 AND m.meta_key = '_tvm_episode_sources' 
+						 AND p.ID IN (SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_parent_id' AND meta_value = %d)
+						 AND p.ID NOT IN (SELECT episode_id FROM $progress_table WHERE user_id = %d AND item_id = %d AND watched_at IS NOT NULL)",
+						$id, $user_id, $id 
+					) );
 
-						if ( $is_watched ) {
-							$ep_watched_count++;
-                            $tv_ep_watched++;
-						} elseif ( ! $is_future ) {
-							$aired_unwatched_count++;
-						}
-
-						if ( $is_future ) $has_upcoming = true;
-
-						if ( ! $has_unwatched_streaming && ! $is_watched && ! $is_future && ! empty( $ep->sources ) ) {
-							$sources = maybe_unserialize( $ep->sources );
-							if ( is_array( $sources ) ) {
-								foreach ( $sources as $s ) {
-									if ( in_array( $s['type'], array( 'rent', 'buy', 'purchase' ) ) ) continue;
-									if ( ! in_array( (int)$s['source_id'], $user_services ) ) continue;
-									if ( ( $s['type'] === 'sub' && strtoupper($s['region']) === $primary_region ) || $s['type'] === 'free' ) {
-										$has_unwatched_streaming = true;
-										break;
-									}
+					foreach ( $ep_sources as $es ) {
+						$sources = maybe_unserialize( $es->meta_value );
+						if ( is_array( $sources ) ) {
+							foreach ( $sources as $s ) {
+								if ( in_array( $s['type'], array( 'rent', 'buy', 'purchase' ) ) ) continue;
+								if ( ! in_array( (int)$s['source_id'], $user_services ) ) continue;
+								if ( ( $s['type'] === 'sub' && strtoupper($s['region']) === $primary_region ) || $s['type'] === 'free' ) {
+									$has_streaming = true;
+									break 2;
 								}
 							}
 						}
 					}
 				}
 
-				$last_sync = get_post_meta( $id, '_tvm_last_sync', true );
 				$watchlist[] = array(
 					'id'                    => $id,
 					'title'                 => get_the_title(),
 					'poster_path'           => get_post_meta( $id, '_tvm_poster_path', true ),
-					'ep_count'              => $ep_count,
-					'ep_watched'            => $ep_watched_count,
-					'aired_unwatched_count' => $aired_unwatched_count,
-					'has_aired_unwatched'   => ( $aired_unwatched_count > 0 ),
-					'has_upcoming'          => $has_upcoming,
-					'has_streaming'         => $has_unwatched_streaming,
-					'last_sync'             => $last_sync ? date( 'M j, g:i a', strtotime( $last_sync ) ) : 'Never'
+					'status'                => get_post_meta( $id, '_tvm_status', true ) ?: 'Unknown',
+					'watched_count'         => $watched, // NEW
+					'aired_unwatched_count' => $unwatched,
+					'upcoming_count'        => $upcoming, // NEW
+					'has_aired_unwatched'   => ( $unwatched > 0 ),
+					'has_upcoming'          => ( $upcoming > 0 ),
+					'has_streaming'         => $has_streaming,
+					'last_sync'             => get_post_meta( $id, '_tvm_last_sync', true ) ? date( 'M j, g:i a', strtotime( get_post_meta( $id, '_tvm_last_sync', true ) ) ) : 'Never'
 				);
 			}
 			wp_reset_postdata();
 		}
-		wp_send_json_success( array( 
-            'items' => $watchlist,
-            'stats' => array(
-                'series'   => count($watchlist),
-                'episodes' => $tv_ep_total,
-                'watched'  => $tv_ep_watched,
-                'percent'  => ($tv_ep_total > 0) ? round(($tv_ep_watched / $tv_ep_total) * 100) : 0
-            )
-        ) );
+		
+		wp_send_json_success( array( 'items' => $watchlist, 'stats' => null ) );
 	}
 }
