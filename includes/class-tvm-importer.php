@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.0.9 - Refined Sync Logic with Stats Preservation
+ * Version 2.0.12 - Import Watch Status Fix
  *
  * @package TV_Movie_Tracker
- * @version 2.0.9
+ * @version 2.0.12
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -132,6 +132,11 @@ class TVM_Importer {
 			update_post_meta( $post_id, '_tvm_poster_path', $details['poster_path'] );
 			update_post_meta( $post_id, '_tvm_tvdb_id', $details['external_ids']['tvdb_id'] ?? 0 );
 			update_post_meta( $post_id, '_tvm_imdb_id', $details['external_ids']['imdb_id'] ?? '' );
+
+			// Improved data integrity by saving Status and Release Date on initial import
+			$release_date = ( 'tv' === $type ) ? ($details['first_air_date'] ?? '') : ($details['release_date'] ?? '');
+			update_post_meta( $post_id, '_tvm_release_date', $release_date );
+			update_post_meta( $post_id, '_tvm_status', $details['status'] ?? 'Released' );
 		}
 
 		$this->ensure_user_progress( $post_id, $type );
@@ -156,7 +161,7 @@ class TVM_Importer {
 	}
 
 	/**
-	 * WEEKLY SYNC LOGIC (v2.0.9)
+	 * WEEKLY SYNC LOGIC
 	 * 1. Sync all active/returning shows (Not Ended/Canceled).
 	 * 2. Sync older shows that still have unwatched episodes.
 	 */
@@ -217,7 +222,27 @@ class TVM_Importer {
 		$lookup = $tvmaze->get_id_by_external( $tvdb_id );
 		if ( ! is_wp_error( $lookup ) && isset( $lookup['id'] ) ) {
 			$episodes = $tvmaze->get_episodes( $lookup['id'] );
-			foreach ( $episodes as $ep ) { $this->upsert_episode( $post_id, $ep ); }
+
+			// Detect Max Season and Max Episode for Series Finale check
+			$max_s = 0; $max_e = 0;
+			foreach($episodes as $e) {
+				if($e['season'] > $max_s) { $max_s = $e['season']; $max_e = $e['number']; }
+				elseif($e['season'] == $max_s && $e['number'] > $max_e) { $max_e = $e['number']; }
+			}
+
+			// Group by season to find season finales
+			$season_map = [];
+			foreach($episodes as $e) {
+				$s = $e['season'];
+				if(!isset($season_map[$s])) $season_map[$s] = 0;
+				if($e['number'] > $season_map[$s]) $season_map[$s] = $e['number'];
+			}
+
+			foreach ( $episodes as $ep ) { 
+				$is_series_final = ($ep['season'] == $max_s && $ep['number'] == $max_e);
+				$is_season_final = ($ep['number'] == $season_map[$ep['season']]);
+				$this->upsert_episode( $post_id, $ep, $is_season_final, $is_series_final ); 
+			}
 		}
 	}
 
@@ -238,11 +263,16 @@ class TVM_Importer {
 		update_post_meta( $post_id, '_tvm_last_sync', current_time( 'mysql' ) );
 	}
 
-	private function upsert_episode( $parent_id, $ep ) {
+	/**
+	 * SMART UPSERT: Efficiently finds existing episode by parent/season/number 
+	 * to prevent duplication while updating metadata.
+	 */
+	private function upsert_episode( $parent_id, $ep, $is_season_final = false, $is_series_final = false ) {
 		global $wpdb;
 		$s = absint($ep['season']); 
 		$n = absint($ep['number']);
 
+		// Optimized lookup: Find episode ID where all 3 keys match in one go
 		$episode_id = $wpdb->get_var( $wpdb->prepare(
 			"SELECT p.ID FROM {$wpdb->posts} p
 			 INNER JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id'
@@ -266,6 +296,7 @@ class TVM_Importer {
 				'post_type'    => 'tvm_episode' 
 			) );
 		} else {
+			// Update existing to ensure title/summary are fresh
 			wp_update_post( array(
 				'ID'           => $episode_id,
 				'post_title'   => $title,
@@ -277,8 +308,19 @@ class TVM_Importer {
 		update_post_meta( $episode_id, '_tvm_season', $s );
 		update_post_meta( $episode_id, '_tvm_number', $n );
 		update_post_meta( $episode_id, '_tvm_air_date', $ep['airdate'] );
+
+		// Milestone Flags
+		update_post_meta( $episode_id, '_tvm_is_season_premiere', ($n === 1) ? 'yes' : 'no' );
+		update_post_meta( $episode_id, '_tvm_is_season_finale', ($is_season_final) ? 'yes' : 'no' );
+		
+		$show_status = strtolower(get_post_meta($parent_id, '_tvm_status', true));
+		$is_ended = in_array($show_status, ['ended', 'canceled']);
+		update_post_meta( $episode_id, '_tvm_is_series_finale', ($is_ended && $is_series_final) ? 'yes' : 'no' );
 	}
 
+	/**
+	 * Updates sources using the same smart lookup logic
+	 */
 	private function update_ep_sources( $parent_id, $wm_ep ) {
 		global $wpdb;
 		$s = absint($wm_ep['season_number']); 
@@ -302,12 +344,30 @@ class TVM_Importer {
 		}
 	}
 
+	/**
+	 * Ensures the user has a progress record for the item.
+	 * Explicitly sets watched_at to NULL to prevent items from being auto-flagged as watched on import.
+	 */
 	private function ensure_user_progress( $post_id, $type ) {
 		global $wpdb;
+		$user_id = get_current_user_id();
 		$table = $wpdb->prefix . 'tvm_user_progress';
-		$exists = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM $table WHERE user_id = %d AND item_id = %d AND season_number = 0", get_current_user_id(), $post_id ) );
+		
+		$exists = $wpdb->get_var( $wpdb->prepare( 
+			"SELECT id FROM $table WHERE user_id = %d AND item_id = %d AND season_number = 0", 
+			$user_id, 
+			$post_id 
+		) );
+
 		if ( ! $exists ) {
-			$wpdb->insert( $table, array( 'user_id' => get_current_user_id(), 'item_id' => $post_id, 'media_type' => $type, 'season_number' => 0, 'episode_number' => 0 ) );
+			$wpdb->insert( $table, array( 
+				'user_id'        => $user_id, 
+				'item_id'        => $post_id, 
+				'media_type'     => $type, 
+				'season_number'  => 0, 
+				'episode_number' => 0,
+				'watched_at'     => null // FIX: Ensure item is NOT flagged as watched on import
+			) );
 		}
 	}
 }
