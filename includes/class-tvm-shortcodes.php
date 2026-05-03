@@ -1,7 +1,7 @@
 <?php
 /**
  * Frontend Shortcodes
- * Version 1.9.3 - Search List View & Stats Integration
+ * Version 2.1.0 - Surgical Routing Integration
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -51,16 +51,30 @@ class TVM_Shortcodes {
 			return '<div style="text-align:center; padding:40px;"><h3>Please log in.</h3>' . wp_login_form( array( 'echo' => false ) ) . '</div>';
 		}
 
+		// Detect if we are on a surgical view
+		$current_view = get_query_var( 'tvm_view' );
+
 		wp_enqueue_style( 'dashicons' );
-		wp_enqueue_script( 'tvm-movie-js', TVM_URL . 'assets/js/tvm-movie.js', array( 'jquery' ), TVM_VERSION, true );
-		wp_enqueue_script( 'tvm-tv-js', TVM_URL . 'assets/js/tvm-tv.js', array( 'jquery' ), TVM_VERSION, true );
-		wp_enqueue_script( 'tvm-search-js', TVM_URL . 'assets/js/tvm-search.js', array( 'jquery' ), TVM_VERSION, true );
+		
+		// Always load settings and core
 		wp_enqueue_script( 'tvm-settings-js', TVM_URL . 'assets/js/tvm-settings.js', array( 'jquery' ), TVM_VERSION, true );
-		wp_enqueue_script( 'tvm-core-js', TVM_URL . 'assets/js/tvm-core.js', array( 'jquery', 'tvm-movie-js', 'tvm-tv-js', 'tvm-search-js', 'tvm-settings-js' ), TVM_VERSION, true );
+
+		if ( $current_view === 'tv-unwatched' ) {
+			// SURGICAL ENQUEUE: Only load core and the dedicated script
+			wp_enqueue_script( 'tvm-core-js', TVM_URL . 'assets/js/tvm-core.js', array( 'jquery', 'tvm-settings-js' ), TVM_VERSION, true );
+			wp_enqueue_script( 'tvm-tv-unwatched-js', TVM_URL . 'assets/js/tvm-tv-unwatched.js', array( 'tvm-core-js' ), TVM_VERSION, true );
+		} else {
+			// STANDARD ENQUEUE: Load all modules for the full dashboard
+			wp_enqueue_script( 'tvm-movie-js', TVM_URL . 'assets/js/tvm-movie.js', array( 'jquery' ), TVM_VERSION, true );
+			wp_enqueue_script( 'tvm-tv-js', TVM_URL . 'assets/js/tvm-tv.js', array( 'jquery' ), TVM_VERSION, true );
+			wp_enqueue_script( 'tvm-search-js', TVM_URL . 'assets/js/tvm-search.js', array( 'jquery' ), TVM_VERSION, true );
+			wp_enqueue_script( 'tvm-core-js', TVM_URL . 'assets/js/tvm-core.js', array( 'jquery', 'tvm-movie-js', 'tvm-tv-js', 'tvm-search-js', 'tvm-settings-js' ), TVM_VERSION, true );
+		}
 
 		wp_localize_script( 'tvm-core-js', 'tvm_app', array(
-			'ajax_url' => admin_url( 'admin-ajax.php' ),
-			'nonce'    => wp_create_nonce( 'tvm_import_nonce' ),
+			'ajax_url'     => admin_url( 'admin-ajax.php' ),
+			'nonce'        => wp_create_nonce( 'tvm_import_nonce' ),
+			'current_view' => $current_view,
 		));
 
 		ob_start();
@@ -69,11 +83,12 @@ class TVM_Shortcodes {
 			<header style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px;">
 				<h2 style="margin:0; display:flex; align-items:center; gap:10px;">
                     <span class="dashicons dashicons-format-video" style="font-size:28px; width:28px; height:28px;"></span> 
-                    My Media Vault
+                    <?php echo ( $current_view === 'tv-unwatched' ) ? 'TV Unwatched Queue' : 'My Media Vault'; ?>
                 </h2>
 				<div id="tvm-stats-display" style="font-size: 12px; color: #666; font-weight: 600; text-align: right; line-height: 1.4;"></div>
 			</header>
 
+			<?php if ( ! $current_view ) : // Only show Main Nav on full dashboard ?>
 			<nav id="tvm-main-nav" style="margin-bottom: 25px;">
 				<ul style="list-style: none; padding: 0; display: flex; gap: 20px; border-bottom: 1px solid #eee; margin:0;">
 					<li><a href="#" class="tvm-nav-link active" data-tab="watchlist">My Vault</a></li>
@@ -82,21 +97,29 @@ class TVM_Shortcodes {
 					<li><a href="#" class="tvm-nav-link" data-tab="settings">My Settings</a></li>
 				</ul>
 			</nav>
+			<?php endif; ?>
 
 			<main id="tvm-app-content">
 				<section id="tvm-view-watchlist">
+					<?php if ( ! $current_view ) : // Only show Toggles on full dashboard ?>
 					<div class="tvm-media-toggle" style="margin-bottom: 20px; display: flex; gap: 10px; border-bottom: 1px solid #f0f0f0; padding-bottom: 15px;">
 						<button class="tvm-type-tab active" data-type="tv">TV Shows</button>
 						<button class="tvm-type-tab" data-type="movie">Movies</button>
 					</div>
+					<?php endif; ?>
 
 					<div class="tvm-filters-container" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
 						<div class="tvm-filters" style="display: flex; gap: 8px;">
-							<button class="tvm-filter-btn active" data-filter="all">All</button>
-							<button class="tvm-filter-btn" data-filter="watched">Watched</button>
-							<button class="tvm-filter-btn" data-filter="released">Unwatched</button>
-							<button class="tvm-filter-btn" data-filter="upcoming">Upcoming</button>
-							<button class="tvm-filter-btn tvm-calendar-toggle" data-filter="calendar">Calendar</button>
+							<?php if ( ! $current_view ) : ?>
+								<button class="tvm-filter-btn active" data-filter="all">All</button>
+								<button class="tvm-filter-btn" data-filter="watched">Watched</button>
+								<button class="tvm-filter-btn" data-filter="released">Unwatched</button>
+								<button class="tvm-filter-btn" data-filter="upcoming">Upcoming</button>
+								<button class="tvm-filter-btn tvm-calendar-toggle" data-filter="calendar">Calendar</button>
+							<?php else : ?>
+								<button class="tvm-filter-btn active">Filter: Unwatched</button>
+								<a href="<?php echo home_url('/'); ?>" class="tvm-filter-btn" style="text-decoration:none;">&larr; Exit to Full Vault</a>
+							<?php endif; ?>
 						</div>
 						<div class="tvm-vault-controls" style="display: flex; align-items: center; gap: 15px;">
 							<label style="font-size: 12px; display: flex; align-items: center; gap: 5px; cursor: pointer; color: #666; font-weight: 600;">
@@ -110,12 +133,13 @@ class TVM_Shortcodes {
 
 					<div id="tvm-tv-detail-view" style="display:none; margin-top:20px;">
 						<button id="tvm-back-to-grid" class="button" style="margin-bottom:20px; border-radius:8px; display:flex; align-items:center; gap:5px;">
-                            <span class="dashicons dashicons-arrow-left-alt2"></span> Back to Shows
+                            <span class="dashicons dashicons-arrow-left-alt2"></span> Back to List
                         </button>
 						<div id="tvm-series-content"></div>
 					</div>
 				</section>
 
+				<?php if ( ! $current_view ) : // Keep all other sections intact ?>
 				<section id="tvm-view-search" style="display:none;">
 					<div style="display:flex; gap:10px; margin-bottom:20px;">
 						<input type="text" id="tvm-frontend-search-input" placeholder="Search TMDb..." style="flex:1; padding:12px; border:1px solid #ddd; border-radius:8px;">
@@ -142,6 +166,7 @@ class TVM_Shortcodes {
 						<p>Loading settings...</p>
 					</div>
 				</section>
+				<?php endif; ?>
 			</main>
 
 			<div id="tvm-details-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:99999; align-items:center; justify-content:center; padding:20px;">
