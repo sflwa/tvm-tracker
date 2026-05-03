@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.0.12 - Import Watch Status Fix
+ * Version 2.1.0 - Automated Stats Recalculation in Weekly Sync
  *
  * @package TV_Movie_Tracker
- * @version 2.0.12
+ * @version 2.1.0
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -41,7 +41,14 @@ class TVM_Importer {
 			$user_id = get_current_user_id();
 		}
 		
-		if ( ! $user_id || ! $post_id ) return;
+		// CRITICAL: Cron context fix. If running via WP-Cron, user_id is 0.
+		// We target the primary admin account to ensure stats remain updated.
+		if ( ! $user_id || $user_id === 0 ) {
+			$admins = get_users( array( 'role' => 'administrator', 'number' => 1, 'orderby' => 'ID', 'order' => 'ASC' ) );
+			$user_id = ! empty( $admins ) ? $admins[0]->ID : 1;
+		}
+
+		if ( ! $post_id ) return;
 
 		$today_str = current_time( 'Y-m-d' );
 		$table_progress = $wpdb->prefix . 'tvm_user_progress';
@@ -161,9 +168,10 @@ class TVM_Importer {
 	}
 
 	/**
-	 * WEEKLY SYNC LOGIC
+	 * WEEKLY SYNC LOGIC (v2.1.0)
 	 * 1. Sync all active/returning shows (Not Ended/Canceled).
 	 * 2. Sync older shows that still have unwatched episodes.
+	 * 3. ENSURES: flat table recalculation for visible grid accuracy.
 	 */
 	public function run_weekly_sync() {
 		$shows = get_posts( array( 
@@ -181,6 +189,8 @@ class TVM_Importer {
 			if ( $is_active || ! $this->is_item_fully_watched( $show->ID, 'tv' ) ) {
 				$this->sync_tvmaze_metadata( $show->ID, get_post_meta( $show->ID, '_tvm_tvdb_id', true ) );
 				$this->sync_watchmode_data( $show->ID );
+				
+				// Automated recalibration of the optimized stats table
 				$this->recalculate_series_stats( $show->ID );
 			}
 		}
@@ -318,9 +328,6 @@ class TVM_Importer {
 		update_post_meta( $episode_id, '_tvm_is_series_finale', ($is_ended && $is_series_final) ? 'yes' : 'no' );
 	}
 
-	/**
-	 * Updates sources using the same smart lookup logic
-	 */
 	private function update_ep_sources( $parent_id, $wm_ep ) {
 		global $wpdb;
 		$s = absint($wm_ep['season_number']); 
