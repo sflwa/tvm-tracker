@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.1.0 - Automated Stats Recalculation in Weekly Sync
+ * Version 2.1.1 - Automated Multi-User Stats Recalculation
  *
  * @package TV_Movie_Tracker
- * @version 2.1.0
+ * @version 2.1.1
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -41,14 +41,7 @@ class TVM_Importer {
 			$user_id = get_current_user_id();
 		}
 		
-		// CRITICAL: Cron context fix. If running via WP-Cron, user_id is 0.
-		// We target the primary admin account to ensure stats remain updated.
-		if ( ! $user_id || $user_id === 0 ) {
-			$admins = get_users( array( 'role' => 'administrator', 'number' => 1, 'orderby' => 'ID', 'order' => 'ASC' ) );
-			$user_id = ! empty( $admins ) ? $admins[0]->ID : 1;
-		}
-
-		if ( ! $post_id ) return;
+		if ( ! $user_id || ! $post_id ) return;
 
 		$today_str = current_time( 'Y-m-d' );
 		$table_progress = $wpdb->prefix . 'tvm_user_progress';
@@ -168,10 +161,7 @@ class TVM_Importer {
 	}
 
 	/**
-	 * WEEKLY SYNC LOGIC (v2.1.0)
-	 * 1. Sync all active/returning shows (Not Ended/Canceled).
-	 * 2. Sync older shows that still have unwatched episodes.
-	 * 3. ENSURES: flat table recalculation for visible grid accuracy.
+	 * WEEKLY SYNC LOGIC (v2.1.1)
 	 */
 	public function run_weekly_sync() {
 		$shows = get_posts( array( 
@@ -181,6 +171,8 @@ class TVM_Importer {
 			'meta_value'     => 'tv' 
 		) );
 
+        $all_users = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'subscriber' ) ) );
+
 		foreach ( $shows as $show ) {
 			$status    = strtolower( get_post_meta( $show->ID, '_tvm_status', true ) );
 			$is_active = ! in_array( $status, array( 'ended', 'canceled' ) );
@@ -189,22 +181,28 @@ class TVM_Importer {
 			if ( $is_active || ! $this->is_item_fully_watched( $show->ID, 'tv' ) ) {
 				$this->sync_tvmaze_metadata( $show->ID, get_post_meta( $show->ID, '_tvm_tvdb_id', true ) );
 				$this->sync_watchmode_data( $show->ID );
-				
-				// Automated recalibration of the optimized stats table
-				$this->recalculate_series_stats( $show->ID );
+
+                // Automated stats refresh for all users to ensure "Unwatched" queue is accurate
+                foreach ( $all_users as $user ) {
+                    $this->recalculate_series_stats( $show->ID, $user->ID );
+                }
 			}
 		}
 	}
 
 	public function run_monthly_sync() {
 		$items = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1 ) );
+        $all_users = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'subscriber' ) ) );
+
 		foreach ( $items as $item ) {
 			$type = get_post_meta( $item->ID, '_tvm_media_type', true );
 			if ( ! $this->is_item_fully_watched( $item->ID, $type ) ) {
 				$this->sync_watchmode_data( $item->ID );
 			}
 			if ( 'tv' === $type ) {
-				$this->recalculate_series_stats( $item->ID );
+                foreach ( $all_users as $user ) {
+				    $this->recalculate_series_stats( $item->ID, $user->ID );
+                }
 			}
 		}
 	}
@@ -328,6 +326,9 @@ class TVM_Importer {
 		update_post_meta( $episode_id, '_tvm_is_series_finale', ($is_ended && $is_series_final) ? 'yes' : 'no' );
 	}
 
+	/**
+	 * Updates sources using the same smart lookup logic
+	 */
 	private function update_ep_sources( $parent_id, $wm_ep ) {
 		global $wpdb;
 		$s = absint($wm_ep['season_number']); 
