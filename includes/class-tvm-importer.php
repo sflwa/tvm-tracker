@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.1.1 - Automated Multi-User Stats Recalculation
+ * Version 2.1.2 - Added Weekly Movie Metadata Refresh
  *
  * @package TV_Movie_Tracker
- * @version 2.1.1
+ * @version 2.1.2
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -95,10 +95,7 @@ class TVM_Importer {
 		global $wpdb;
 		$user_id = get_current_user_id();
 		
-		// Remove from Progress Table
 		$wpdb->delete( $wpdb->prefix . 'tvm_user_progress', array( 'user_id' => $user_id, 'item_id' => $post_id ) );
-		
-		// Remove from Stats Summary Table
 		$wpdb->delete( $wpdb->prefix . 'tvm_series_stats', array( 'user_id' => $user_id, 'item_id' => $post_id ) );
 		
 		wp_send_json_success( 'Item removed from your vault.' );
@@ -133,7 +130,6 @@ class TVM_Importer {
 			update_post_meta( $post_id, '_tvm_tvdb_id', $details['external_ids']['tvdb_id'] ?? 0 );
 			update_post_meta( $post_id, '_tvm_imdb_id', $details['external_ids']['imdb_id'] ?? '' );
 
-			// Improved data integrity by saving Status and Release Date on initial import
 			$release_date = ( 'tv' === $type ) ? ($details['first_air_date'] ?? '') : ($details['release_date'] ?? '');
 			update_post_meta( $post_id, '_tvm_release_date', $release_date );
 			update_post_meta( $post_id, '_tvm_status', $details['status'] ?? 'Released' );
@@ -151,48 +147,90 @@ class TVM_Importer {
 		wp_send_json_success( array( 'post_id' => $post_id ) );
 	}
 
+	/**
+	 * Manual sync handler
+	 * Supports both TV (TVmaze) and Movies (TMDb Refresh)
+	 */
 	public function handle_manual_sync() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		$post_id = absint( $_POST['post_id'] );
-		$this->sync_tvmaze_metadata( $post_id, get_post_meta( $post_id, '_tvm_tvdb_id', true ) );
+		$type    = get_post_meta( $post_id, '_tvm_media_type', true );
+
+		if ( 'movie' === $type ) {
+			$this->refresh_movie_metadata( $post_id );
+		} else {
+			$this->sync_tvmaze_metadata( $post_id, get_post_meta( $post_id, '_tvm_tvdb_id', true ) );
+		}
+
 		$this->sync_watchmode_data( $post_id );
-		$this->recalculate_series_stats( $post_id ); 
+		
+		if ( 'tv' === $type ) {
+			$this->recalculate_series_stats( $post_id ); 
+		}
+
 		wp_send_json_success( "Manual Sync Complete." );
 	}
 
 	/**
-	 * WEEKLY SYNC LOGIC (v2.1.1)
+	 * WEEKLY SYNC LOGIC (v2.1.2)
+	 * Refreshes TV episode schedules and Movie release dates
 	 */
 	public function run_weekly_sync() {
-		$shows = get_posts( array( 
+		$items = get_posts( array( 
 			'post_type'      => 'tvm_item', 
-			'posts_per_page' => -1, 
-			'meta_key'       => '_tvm_media_type', 
-			'meta_value'     => 'tv' 
+			'posts_per_page' => -1 
 		) );
 
-        $all_users = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'subscriber' ) ) );
+		$all_users = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'subscriber' ) ) );
 
-		foreach ( $shows as $show ) {
-			$status    = strtolower( get_post_meta( $show->ID, '_tvm_status', true ) );
-			$is_active = ! in_array( $status, array( 'ended', 'canceled' ) );
-			
-			// Rule: Sync if currently airing OR has unwatched content remaining
-			if ( $is_active || ! $this->is_item_fully_watched( $show->ID, 'tv' ) ) {
-				$this->sync_tvmaze_metadata( $show->ID, get_post_meta( $show->ID, '_tvm_tvdb_id', true ) );
-				$this->sync_watchmode_data( $show->ID );
+		foreach ( $items as $item ) {
+			$type   = get_post_meta( $item->ID, '_tvm_media_type', true );
+			$status = strtolower( get_post_meta( $item->ID, '_tvm_status', true ) );
 
-                // Automated stats refresh for all users to ensure "Unwatched" queue is accurate
-                foreach ( $all_users as $user ) {
-                    $this->recalculate_series_stats( $show->ID, $user->ID );
-                }
+			if ( 'tv' === $type ) {
+				$is_active = ! in_array( $status, array( 'ended', 'canceled' ) );
+				if ( $is_active || ! $this->is_item_fully_watched( $item->ID, 'tv' ) ) {
+					$this->sync_tvmaze_metadata( $item->ID, get_post_meta( $item->ID, '_tvm_tvdb_id', true ) );
+					$this->sync_watchmode_data( $item->ID );
+
+					foreach ( $all_users as $user ) {
+						$this->recalculate_series_stats( $item->ID, $user->ID );
+					}
+				}
+			} else {
+				// MOVIE LOGIC: Check if movie is unwatched and either "Upcoming" or "TBA"
+				$is_watched = $this->is_item_fully_watched( $item->ID, 'movie' );
+				$release_date = get_post_meta( $item->ID, '_tvm_release_date', true );
+				$is_upcoming = ( ! $release_date || strtotime( $release_date ) > time() );
+
+				if ( ! $is_watched && $is_upcoming ) {
+					$this->refresh_movie_metadata( $item->ID );
+					$this->sync_watchmode_data( $item->ID );
+				}
 			}
+		}
+	}
+
+	/**
+	 * Refreshes basic Movie metadata from TMDb (Release Date, Status, Poster)
+	 */
+	private function refresh_movie_metadata( $post_id ) {
+		$tmdb_id = get_post_meta( $post_id, '_tvm_tmdb_id', true );
+		if ( ! $tmdb_id ) return;
+
+		$api = TVM_Tracker::get_instance()->tmdb;
+		$details = $api->get_details( $tmdb_id, 'movie' );
+
+		if ( ! is_wp_error( $details ) ) {
+			update_post_meta( $post_id, '_tvm_release_date', $details['release_date'] ?? '' );
+			update_post_meta( $post_id, '_tvm_status', $details['status'] ?? 'Released' );
+			update_post_meta( $post_id, '_tvm_poster_path', $details['poster_path'] ?? '' );
 		}
 	}
 
 	public function run_monthly_sync() {
 		$items = get_posts( array( 'post_type' => 'tvm_item', 'posts_per_page' => -1 ) );
-        $all_users = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'subscriber' ) ) );
+		$all_users = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'subscriber' ) ) );
 
 		foreach ( $items as $item ) {
 			$type = get_post_meta( $item->ID, '_tvm_media_type', true );
@@ -200,9 +238,9 @@ class TVM_Importer {
 				$this->sync_watchmode_data( $item->ID );
 			}
 			if ( 'tv' === $type ) {
-                foreach ( $all_users as $user ) {
-				    $this->recalculate_series_stats( $item->ID, $user->ID );
-                }
+				foreach ( $all_users as $user ) {
+					$this->recalculate_series_stats( $item->ID, $user->ID );
+				}
 			}
 		}
 	}
@@ -218,12 +256,6 @@ class TVM_Importer {
 		}
 	}
 
-	private function needs_watchmode_sync( $post_id ) {
-		global $wpdb;
-		$has_sources = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_episode_sources' AND post_id IN (SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_parent_id' AND meta_value = %d) AND meta_value != '' AND meta_value != 'a:0:{}'", $post_id ) );
-		return ( $has_sources == 0 && ! $this->is_item_fully_watched( $post_id, 'tv' ) );
-	}
-
 	public function sync_tvmaze_metadata( $post_id, $tvdb_id ) {
 		if ( ! $tvdb_id ) return;
 		$tvmaze = new TVM_API_TVMAZE();
@@ -231,14 +263,12 @@ class TVM_Importer {
 		if ( ! is_wp_error( $lookup ) && isset( $lookup['id'] ) ) {
 			$episodes = $tvmaze->get_episodes( $lookup['id'] );
 
-			// Detect Max Season and Max Episode for Series Finale check
 			$max_s = 0; $max_e = 0;
 			foreach($episodes as $e) {
 				if($e['season'] > $max_s) { $max_s = $e['season']; $max_e = $e['number']; }
 				elseif($e['season'] == $max_s && $e['number'] > $max_e) { $max_e = $e['number']; }
 			}
 
-			// Group by season to find season finales
 			$season_map = [];
 			foreach($episodes as $e) {
 				$s = $e['season'];
@@ -271,26 +301,18 @@ class TVM_Importer {
 		update_post_meta( $post_id, '_tvm_last_sync', current_time( 'mysql' ) );
 	}
 
-	/**
-	 * SMART UPSERT: Efficiently finds existing episode by parent/season/number 
-	 * to prevent duplication while updating metadata.
-	 */
 	private function upsert_episode( $parent_id, $ep, $is_season_final = false, $is_series_final = false ) {
 		global $wpdb;
 		$s = absint($ep['season']); 
 		$n = absint($ep['number']);
 
-		// Optimized lookup: Find episode ID where all 3 keys match in one go
 		$episode_id = $wpdb->get_var( $wpdb->prepare(
 			"SELECT p.ID FROM {$wpdb->posts} p
 			 INNER JOIN {$wpdb->postmeta} m1 ON p.ID = m1.post_id AND m1.meta_key = '_tvm_parent_id'
 			 INNER JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_season'
 			 INNER JOIN {$wpdb->postmeta} m3 ON p.ID = m3.post_id AND m3.meta_key = '_tvm_number'
 			 WHERE p.post_type = 'tvm_episode' 
-			 AND m1.meta_value = %d 
-			 AND m2.meta_value = %d 
-			 AND m3.meta_value = %d 
-			 LIMIT 1",
+			 AND m1.meta_value = %d AND m2.meta_value = %d AND m3.meta_value = %d LIMIT 1",
 			$parent_id, $s, $n
 		) );
 
@@ -304,20 +326,13 @@ class TVM_Importer {
 				'post_type'    => 'tvm_episode' 
 			) );
 		} else {
-			// Update existing to ensure title/summary are fresh
-			wp_update_post( array(
-				'ID'           => $episode_id,
-				'post_title'   => $title,
-				'post_content' => $ep['summary'] ?? ''
-			) );
+			wp_update_post( array( 'ID' => $episode_id, 'post_title' => $title, 'post_content' => $ep['summary'] ?? '' ) );
 		}
 
 		update_post_meta( $episode_id, '_tvm_parent_id', $parent_id );
 		update_post_meta( $episode_id, '_tvm_season', $s );
 		update_post_meta( $episode_id, '_tvm_number', $n );
 		update_post_meta( $episode_id, '_tvm_air_date', $ep['airdate'] );
-
-		// Milestone Flags
 		update_post_meta( $episode_id, '_tvm_is_season_premiere', ($n === 1) ? 'yes' : 'no' );
 		update_post_meta( $episode_id, '_tvm_is_season_finale', ($is_season_final) ? 'yes' : 'no' );
 		
@@ -326,9 +341,6 @@ class TVM_Importer {
 		update_post_meta( $episode_id, '_tvm_is_series_finale', ($is_ended && $is_series_final) ? 'yes' : 'no' );
 	}
 
-	/**
-	 * Updates sources using the same smart lookup logic
-	 */
 	private function update_ep_sources( $parent_id, $wm_ep ) {
 		global $wpdb;
 		$s = absint($wm_ep['season_number']); 
@@ -340,10 +352,7 @@ class TVM_Importer {
 			 INNER JOIN {$wpdb->postmeta} m2 ON p.ID = m2.post_id AND m2.meta_key = '_tvm_season'
 			 INNER JOIN {$wpdb->postmeta} m3 ON p.ID = m3.post_id AND m3.meta_key = '_tvm_number'
 			 WHERE p.post_type = 'tvm_episode' 
-			 AND m1.meta_value = %d 
-			 AND m2.meta_value = %d 
-			 AND m3.meta_value = %d 
-			 LIMIT 1",
+			 AND m1.meta_value = %d AND m2.meta_value = %d AND m3.meta_value = %d LIMIT 1",
 			$parent_id, $s, $n
 		) );
 
@@ -352,10 +361,6 @@ class TVM_Importer {
 		}
 	}
 
-	/**
-	 * Ensures the user has a progress record for the item.
-	 * Explicitly sets watched_at to NULL to prevent items from being auto-flagged as watched on import.
-	 */
 	private function ensure_user_progress( $post_id, $type ) {
 		global $wpdb;
 		$user_id = get_current_user_id();
@@ -374,7 +379,7 @@ class TVM_Importer {
 				'media_type'     => $type, 
 				'season_number'  => 0, 
 				'episode_number' => 0,
-				'watched_at'     => null // FIX: Ensure item is NOT flagged as watched on import
+				'watched_at'     => null
 			) );
 		}
 	}
