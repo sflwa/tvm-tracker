@@ -318,7 +318,7 @@ jQuery(function($) {
         },
 
         render: function(items, isUnwatchedView) {
-            const currentShows = items.filter(i => ['Returning Series', 'Unknown'].includes(i.status));
+            const currentShows = items.filter(i => ['Returning Series', 'Unknown', 'Running'].includes(i.status));
             const futureShows  = items.filter(i => ['In Production'].includes(i.status));
             const oldShows      = items.filter(i => ['Ended', 'Canceled'].includes(i.status));
 
