@@ -17,6 +17,7 @@ class TVM_Importer {
 		// AJAX Hooks
 		add_action( 'wp_ajax_tvm_import_item', array( $this, 'handle_import' ) );
 		add_action( 'wp_ajax_tvm_sync_series', array( $this, 'handle_manual_sync' ) );
+		add_action( 'wp_ajax_tvm_sync_series_status', array( $this, 'handle_status_only_sync' ) );
 		add_action( 'wp_ajax_tvm_delete_item', array( $this, 'handle_delete' ) );
 		
 		// Automation Hooks (WP-Cron)
@@ -384,4 +385,71 @@ class TVM_Importer {
 			) );
 		}
 	}
+
+/**
+	 * AJAX handler to manually update only the parent series status.
+	 */
+	public function handle_status_only_sync() {
+		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
+		
+		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
+		if ( ! $post_id ) { 
+			wp_send_json_error( 'Invalid Post ID.' ); 
+		}
+
+		$tvdb_id = get_post_meta( $post_id, '_tvm_tvdb_id', true );
+		if ( ! $tvdb_id ) {
+			wp_send_json_error( 'TVDB ID missing for status lookup.' );
+		}
+
+		// Run isolated updater
+		$updated_status = $this->sync_tvmaze_status_only( $post_id, $tvdb_id );
+
+		if ( is_wp_error( $updated_status ) ) {
+			wp_send_json_error( $updated_status->get_error_message() );
+		}
+
+		wp_send_json_success( "Series status updated successfully to: " . $updated_status );
+	}
+
+	/**
+	 * Independent lookups targeting ONLY the main show data object.
+	 * Bypasses episode queries and insertions completely.
+	 */
+	public function sync_tvmaze_status_only( $post_id, $tvdb_id ) {
+		if ( ! $tvdb_id ) {
+			return new WP_Error( 'missing_id', 'Missing tracking ID' );
+		}
+
+		$tvmaze = new TVM_API_TVMAZE();
+		$lookup = $tvmaze->get_id_by_external( $tvdb_id );
+
+		if ( is_wp_error( $lookup ) ) {
+			return $lookup;
+		}
+
+		// Grab the core show metadata block from TVmaze without fetching any episode embeds
+		if ( isset( $lookup['id'] ) ) {
+			// Check if your TVmaze class has an explicit fallback to read basic profiles, 
+			// otherwise we read the primary object returned right from the external lookup
+			$status = $lookup['status'] ?? '';
+
+			if ( empty( $status ) && method_exists( $tvmaze, 'get_show_by_id' ) ) {
+				$show_profile = $tvmaze->get_show_by_id( $lookup['id'] );
+				$status = $show_profile['status'] ?? '';
+			}
+
+			if ( ! empty( $status ) ) {
+				update_post_meta( $post_id, '_tvm_status', $status );
+				update_post_meta( $post_id, '_tvm_last_sync', current_time( 'mysql' ) );
+				return $status;
+			}
+		}
+
+		return new WP_Error( 'sync_failed', 'Could not locate status property inside the API payload.' );
+	}
+
+
+
+	
 }
