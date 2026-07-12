@@ -170,6 +170,29 @@ jQuery(function($) {
                     if (res.success) { alert(res.data); this.load(); this.loadEpisodes($btn.data('id')); }
                 });
             });
+			
+			
+			$(document).on('click', '#tvm-update-series-status', (e) => {
+    const $btn = $(e.currentTarget);
+    const seriesId = $btn.data('id');
+    
+    $btn.prop('disabled', true).text('Updating Status...');
+    
+    $.post(tvm_app.ajax_url, { 
+        action: 'tvm_sync_series_status', 
+        post_id: seriesId, 
+        nonce: tvm_app.nonce // Utilizes standard TVM validation context
+    }, (res) => {
+        $btn.prop('disabled', false).text('Update Status Only');
+        if (res.success) { 
+            alert(res.data); 
+            this.load(); // Refresh cache array
+            this.showSeriesDetails(seriesId); // Redraw interface wrapper variables
+        } else {
+            alert('Error updating status: ' + res.data);
+        }
+    });
+});
         },
 
         switchToFilter: function(filterName) {
