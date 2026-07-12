@@ -387,6 +387,7 @@ jQuery(function($) {
                             <span style="background:${statusColor}; color:#fff; padding:4px 12px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">${item.status}</span>
                         </div>
                         <button id="tvm-sync-episodes" class="button button-primary" data-id="${id}" style="border-radius:6px; font-weight:600;">Sync Metadata</button>
+                        <button id="tvm-update-series-status" class="button button-secondary" data-id="${id}" style="border-radius:6px; font-weight:600; margin-left: 8px;">Update Status Only</button>
                     </div>
                     
                     <div class="tvm-detail-stats" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:15px; margin-top:20px; border-top:1px solid #f0f0f0; padding-top:20px;">
