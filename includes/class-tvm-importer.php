@@ -261,10 +261,6 @@ class TVM_Importer {
 		$tvmaze = new TVM_API_TVMAZE();
 		$lookup = $tvmaze->get_id_by_external( $tvdb_id );
 		if ( ! is_wp_error( $lookup ) && isset( $lookup['id'] ) ) {
-
-            if ( isset( $lookup['status'] ) ) {
-				update_post_meta( $post_id, '_tvm_status', sanitize_text_field( $lookup['status'] ) );
-			}
 			
 			$episodes = $tvmaze->get_episodes( $lookup['id'] );
 
