@@ -1,7 +1,7 @@
 <?php
 /**
  * Frontend Shortcodes
- * Version 2.1.0 - Surgical Routing Integration
+ * Version 2.1.1 - Added Manual Triggers in My Stats Section
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -156,6 +156,14 @@ class TVM_Shortcodes {
 				</section>
 
                 <section id="tvm-view-stats" style="display:none; padding:20px 0;">
+                    <div style="display:flex; gap:12px; margin-bottom:30px; background:#f5f7f9; padding:18px; border-radius:12px; border:1px solid #d1d9e0;">
+                        <button id="tvm-manual-recalculate-stats" class="button button-secondary" style="border-radius:8px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                            <span class="dashicons dashicons-update"></span> Recalculate All Library Stats
+                        </button>
+                        <button id="tvm-manual-send-digest" class="button button-secondary" style="border-radius:8px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                            <span class="dashicons dashicons-email"></span> Send Weekly Digest Now
+                        </button>
+                    </div>
                     <div id="tvm-stats-container">
                         <p style="text-align:center; padding:40px;">Calculating stats...</p>
                     </div>
