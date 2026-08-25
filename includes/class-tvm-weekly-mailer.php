@@ -1,7 +1,7 @@
 <?php
 /**
  * Weekly Sunday Digest Mailer
- * Version 1.0.3 - Alphabetical Sorting & Layout Padding
+ * Version 1.0.4 - AJAX Manual Trigger & Upcoming Week Only
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -12,15 +12,35 @@ class TVM_Weekly_Mailer {
 
 	public function __construct() {
 		add_action( 'tvm_sunday_morning_email', array( $this, 'send_weekly_digest' ) );
+        add_action( 'wp_ajax_tvm_send_manual_digest', array( $this, 'handle_manual_digest' ) );
 	}
+
+    /**
+     * AJAX handler for manual email trigger
+     */
+    public function handle_manual_digest() {
+        check_ajax_referer( 'tvm_import_nonce', 'nonce' );
+        $user_id = get_current_user_id();
+        $user = get_userdata( $user_id );
+
+        if ( ! $user ) {
+            wp_send_json_error( 'User not found.' );
+        }
+
+        $episodes = $this->get_weekly_episodes( $user_id );
+        
+        if ( empty( $episodes ) ) {
+            wp_send_json_error( 'No upcoming episodes found for your library this week.' );
+        }
+
+        $this->mail_user( $user, $episodes );
+        wp_send_json_success( 'Your Weekly Digest has been sent to ' . $user->user_email );
+    }
 
 	/**
 	 * Main execution loop for the weekly cron
 	 */
 	public function send_weekly_digest() {
-		global $wpdb;
-		
-		// Include Administrator, Editor, Author, and Subscriber roles
 		$users = get_users( array( 'role__in' => array( 'administrator', 'editor', 'author', 'subscriber' ) ) );
 
 		foreach ( $users as $user ) {
@@ -33,7 +53,6 @@ class TVM_Weekly_Mailer {
 
 	/**
 	 * Fetch episodes airing in the next 7 days for a specific user
-	 * Sorted by Date and then Alphabetically by Show Title
 	 */
 	public function get_weekly_episodes( $user_id ) {
 		global $wpdb;
@@ -85,7 +104,6 @@ class TVM_Weekly_Mailer {
 				$show_title = $ep->show_name;
 				$clean_ep_title = preg_replace('/^S\d+E\d+\s-\s/i', '', $ep->ep_title);
 
-				// New Date Header grouping
 				if ( $last_date !== $ep->air_date ) :
 					$last_date = $ep->air_date;
 					?>
