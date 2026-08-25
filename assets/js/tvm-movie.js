@@ -1,6 +1,7 @@
 /**
  * TV & Movie Tracker - Movie Module
- * Version 1.1.6 - Verified AJAX Handshake
+ * Version 1.1.9 - UI Fix: Enforced 12-column grid density
+ * Author: South Florida Web Advisors
  */
 jQuery(function($) {
     const MovieModule = {
@@ -30,15 +31,14 @@ jQuery(function($) {
                 TVM_Core.hideLoading();
                 if (res.success) {
                     window.tvm_movie_cache = res.data.items;
-                    this.updateStats(res.data.stats);
                     this.applyFilter();
                 }
             });
         },
 
         updateStats: function(s) {
-            const html = `Movies: ${s.total} Total • ${s.available} Released • ${s.watched} Watched • ${s.percent}%`;
-            $('#tvm-stats-display').html(html);
+            // Metrics live in the dedicated tab
+            $('#tvm-stats-display').empty();
         },
 
         applyFilter: function() {
@@ -76,7 +76,7 @@ jQuery(function($) {
 
                 const posterContent = (item.poster_path && item.poster_path !== "") 
                     ? `<img src="https://image.tmdb.org/t/p/w185${item.poster_path}" style="width:100%; height:100%; object-fit:cover; display:block;">`
-                    : `<div class="tvm-placeholder-poster"><span class="dashicons dashicons-format-video"></span><span class="placeholder-text">No Poster</span></div>`;
+                    : `<div class="tvm-placeholder-poster"><span class="dashicons dashicons-video-alt3"></span><span class="placeholder-text">No Poster</span></div>`;
 
                 html += `
                 <div class="tvm-movie-card">
@@ -90,17 +90,19 @@ jQuery(function($) {
                             <span class="dashicons dashicons-dismiss tvm-quick-untrack" data-tmdb="${item.tmdb_id}" style="color:#ff4d4d;"></span>
                         </div>
                     </div>
-                    <h5 style="margin:8px 0; font-size:11px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>
+                    <h5 style="margin:8px 0; font-size:10px; text-align:center; color:#333; font-weight:600;">${item.title}</h5>
                 </div>`;
             });
-            $('#tvm-watchlist-grid').html(html || '<p style="grid-column:1/-1; text-align:center; padding:40px;">No movies found.</p>');
+            
+            // Explicitly ensure the grid class is applied for 12-column layout
+            $('#tvm-watchlist-grid').addClass('tvm-locked-grid').html(html || '<p style="grid-column:1/-1; text-align:center; padding:40px;">No movies found.</p>');
         },
 
         toggleWatched: function($btn) {
             $.post(tvm_app.ajax_url, { 
                 action: 'tvm_toggle_watched', 
                 tmdb_id: $btn.data('tmdb'), 
-                watched: $btn.data('watched').toString(), // Ensure string
+                watched: $btn.data('watched').toString(),
                 nonce: tvm_app.nonce 
             }, () => { this.load(); });
         },
