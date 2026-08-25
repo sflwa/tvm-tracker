@@ -1,6 +1,6 @@
 /**
  * TV & Movie Tracker - Core Orchestrator
- * Version 2.0.5 - Expanded Stats Visualization
+ * Version 2.0.6 - Manual Refresh & Email Triggers
  */
 jQuery(function($) {
     window.TVM_Core = {
@@ -87,6 +87,29 @@ jQuery(function($) {
             });
         }
     };
+
+    // Manual Recalculate Logic
+    $(document).on('click', '#tvm-manual-recalculate-stats', function(e) {
+        e.preventDefault();
+        const $btn = $(this);
+        $btn.prop('disabled', true).text('Working...');
+        $.post(tvm_app.ajax_url, { action: 'tvm_recalculate_all_stats', nonce: tvm_app.nonce }, function(res) {
+            alert(res.data);
+            $btn.prop('disabled', false).html('<span class="dashicons dashicons-update"></span> Recalculate All Library Stats');
+            TVM_Core.loadStatsPage();
+        });
+    });
+
+    // Manual Email Logic
+    $(document).on('click', '#tvm-manual-send-digest', function(e) {
+        e.preventDefault();
+        const $btn = $(this);
+        $btn.prop('disabled', true).text('Sending Email...');
+        $.post(tvm_app.ajax_url, { action: 'tvm_send_manual_digest', nonce: tvm_app.nonce }, function(res) {
+            alert(res.data);
+            $btn.prop('disabled', false).html('<span class="dashicons dashicons-email"></span> Send Weekly Digest Now');
+        });
+    });
 
     // Routing Logic
     $(document).on('click', '.tvm-nav-link', function(e) {
