@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX Settings Handler
- * Version 1.0.6 - Automatic Cache Recovery
+ * Version 1.0.8 - Resolved Fatal Class Name Collision
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -63,6 +63,21 @@ class TVM_Settings_Handler {
 			update_user_meta( $user_id, 'tvm_primary_region', sanitize_text_field( $_POST['primary_region'] ) );
 		}
 
-		wp_send_json_success( 'Settings updated' );
+		// Trigger high-performance stats refresh for existing shows
+		if ( class_exists( 'TVM_Importer' ) ) {
+			$importer = new TVM_Importer();
+			$shows = get_posts( array( 
+				'post_type'      => 'tvm_item', 
+				'posts_per_page' => -1, 
+				'meta_key'       => '_tvm_media_type', 
+				'meta_value'     => 'tv' 
+			) );
+
+			foreach ( $shows as $show ) {
+				$importer->recalculate_series_stats( $show->ID, $user_id );
+			}
+		}
+
+		wp_send_json_success( 'Settings updated and library stats refreshed.' );
 	}
 }
