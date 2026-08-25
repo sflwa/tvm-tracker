@@ -1,10 +1,10 @@
 <?php
 /**
  * AJAX TV Details Handler
- * Version 1.1.3 - Human Readable Dates
+ * Version 1.1.4 - Added Real-Time Summary Table Updates
  *
  * @package TV_Movie_Tracker
- * @version 1.1.3
+ * @version 1.1.4
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -95,6 +95,13 @@ class TVM_TV_Details {
 				'watched_at' => $watched ? current_time( 'mysql' ) : null
 			));
 		}
+
+		// NEW: Trigger high-performance stats recalculation for the flat table
+		if ( class_exists( 'TVM_Importer' ) ) {
+			$importer = new TVM_Importer();
+			$importer->recalculate_series_stats( $item_id, $user_id );
+		}
+
 		wp_send_json_success();
 	}
 }
