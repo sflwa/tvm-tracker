@@ -524,3 +524,29 @@
     color: #fff;
     border-color: #2271b1;
 }
+
+/* --- INDIVIDUAL EPISODE PROGRESS BAR --- */
+.tvm-episode-row {
+    position: relative; /* Required for absolute child */
+    overflow: hidden;   /* Ensures the bar doesn't spill out of rounded corners */
+    z-index: 1;
+}
+
+.tvm-ep-row-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0%;
+    background: rgba(34, 113, 177, 0.08); /* Faint blue tint */
+    border-right: 2px solid #2271b1;      /* Leading edge of the bar */
+    z-index: -1;                          /* Sits behind text/content */
+    transition: width 6.0s cubic-bezier(0.1, 0.5, 0.5, 1);
+    pointer-events: none;
+}
+
+/* State when loading */
+.tvm-episode-row.is-updating .tvm-ep-row-progress {
+    width: 100%;
+}
+
