@@ -1,7 +1,7 @@
 <?php
 /**
  * AJAX Movie Watchlist Handler
- * Version 1.0.4 - Strict TBA/Released Separation
+ * Version 1.0.6 - Performance Optimization: Removed Global Stats
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -32,7 +32,7 @@ class TVM_Movie_Handler {
 		);
 
 		if ( empty( $user_movies ) ) {
-			wp_send_json_success( array( 'items' => array(), 'stats' => array() ) );
+			wp_send_json_success( array( 'items' => array(), 'stats' => null ) );
 		}
 
 		$query = new WP_Query( array(
@@ -67,12 +67,11 @@ class TVM_Movie_Handler {
 					'poster_path'   => get_post_meta( $id, '_tvm_poster_path', true ),
 					'tmdb_id'       => get_post_meta( $id, '_tvm_tmdb_id', true ),
 					'is_watched'    => $is_watched,
-					'status'        => 'released', // Default
+					'status'        => 'released', 
 					'days_to_go'    => null,
                     'has_streaming' => false
 				);
 
-                // Determine Status strictly
 				if ( ! $release_date ) {
                     $item['status'] = 'upcoming';
                     $item['days_to_go'] = 'TBA';
@@ -84,7 +83,6 @@ class TVM_Movie_Handler {
 					}
 				}
 
-                // Streaming Check
                 foreach ( $raw_sources as $s ) {
                     $sid   = (int) $s['source_id'];
                     $stype = $source_map[$sid] ?? $s['type'];
@@ -104,24 +102,9 @@ class TVM_Movie_Handler {
 			wp_reset_postdata();
 		}
 
-        // Calculate stats for REAL available (Released) movies only
-        $count_released = 0; 
-        $count_watched = 0;
-        foreach($watchlist as $w) {
-            if($w['status'] === 'released') {
-                $count_released++;
-                if($w['is_watched']) $count_watched++;
-            }
-        }
-
 		wp_send_json_success( array(
 			'items' => $watchlist,
-			'stats' => array(
-				'total'     => count( $watchlist ),
-				'available' => $count_released,
-				'watched'   => $count_watched,
-				'percent'   => ( $count_released > 0 ) ? round( ( $count_watched / $count_released ) * 100 ) : 0
-			)
+			'stats' => null // Performance Optimization
 		) );
 	}
 
@@ -133,7 +116,7 @@ class TVM_Movie_Handler {
         $watched = ( $_POST['watched'] === 'true' );
         $table   = $wpdb->prefix . 'tvm_user_progress';
 
-        $post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_tmdb_id' AND meta_value = %s LIMIT 1", $tmdb_id ) );
+        $post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->posts} p JOIN {$wpdb->postmeta} m ON p.ID = m.post_id WHERE m.meta_key = '_tvm_tmdb_id' AND m.meta_value = %s LIMIT 1", $tmdb_id ) );
 
         if ( $watched ) {
             $wpdb->update( $table, array( 'watched_at' => current_time( 'mysql' ) ), array( 'user_id' => $user_id, 'item_id' => $post_id, 'media_type' => 'movie' ) );
@@ -150,7 +133,7 @@ class TVM_Movie_Handler {
         $tmdb_id = sanitize_text_field( $_POST['tmdb_id'] );
         $table   = $wpdb->prefix . 'tvm_user_progress';
 
-        $post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_tvm_tmdb_id' AND meta_value = %s LIMIT 1", $tmdb_id ) );
+        $post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM {$wpdb->posts} p JOIN {$wpdb->postmeta} m ON p.ID = m.post_id WHERE m.meta_key = '_tvm_tmdb_id' AND m.meta_value = %s LIMIT 1", $tmdb_id ) );
 
         $wpdb->delete( $table, array( 'user_id' => $user_id, 'item_id' => $post_id ) );
         wp_send_json_success();
