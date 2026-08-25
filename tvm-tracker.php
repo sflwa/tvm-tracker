@@ -3,7 +3,7 @@
  * Plugin Name:       TV & Movie Tracker
  * Plugin URI:        https://sflwa.com/
  * Description:       A premium personal library for tracking TV shows and Movies.
- * Version:           2.1.0
+ * Version:           2.1.1
  * Author:            South Florida Web Advisors
  * License:           GPLv2 or later
  * Text Domain:       tvm-tracker
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'TVM_VERSION', '2.1.0' );
+define( 'TVM_VERSION', '2.1.1' );
 define( 'TVM_PATH', plugin_dir_path( __FILE__ ) );
 define( 'TVM_URL', plugin_dir_url( __FILE__ ) );
 
@@ -69,19 +69,53 @@ final class TVM_Tracker {
         
         // Flush rewrites on activation
         register_activation_hook( __FILE__, 'flush_rewrite_rules' );
+
+		// Load custom templates for single and archive tvm_item CPT
+		add_filter( 'template_include', array( $this, 'load_cpt_templates' ) );
 	}
+
+    /**
+     * Load custom templates for tvm_item post type (Single and Archive)
+     */
+    public function load_cpt_templates( $template ) {
+        // 1. Single TV/Movie Item Template
+        if ( is_singular( 'tvm_item' ) ) {
+            $theme_template = locate_template( array( 'single-tvm_item.php' ) );
+            if ( $theme_template ) {
+                return $theme_template;
+            }
+            
+            $plugin_template = TVM_PATH . 'single-tvm_item.php';
+            if ( file_exists( $plugin_template ) ) {
+                return $plugin_template;
+            }
+        }
+
+        // 2. Master Library Archive Index Template
+        if ( is_post_type_archive( 'tvm_item' ) ) {
+            $theme_archive = locate_template( array( 'archive-tvm_item.php' ) );
+            if ( $theme_archive ) {
+                return $theme_archive;
+            }
+
+            $plugin_archive = TVM_PATH . 'archive-tvm_item.php';
+            if ( file_exists( $plugin_archive ) ) {
+                return $plugin_archive;
+            }
+        }
+
+        return $template;
+    }
 
     /**
      * Register custom URL segments for dedicated views
      */
     public function register_rewrite_rules() {
         add_rewrite_rule( 
-        'test/tv-unwatched/?$', 
-        'index.php?page_id=20840&tvm_view=tv-unwatched', 
-        'top' 
-    );
-		
-        // Future endpoints can be added here (e.g., tv-upcoming, tv-calendar)
+            'test/tv-unwatched/?$', 
+            'index.php?page_id=20840&tvm_view=tv-unwatched', 
+            'top' 
+        );
     }
 
     /**
@@ -109,7 +143,12 @@ final class TVM_Tracker {
 		
 		wp_enqueue_script( 'tvm-core-js', TVM_URL . 'assets/js/tvm-core.js', array( 'jquery' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-movie-js', TVM_URL . 'assets/js/tvm-movie.js', array( 'tvm-core-js' ), TVM_VERSION, true );
-		wp_enqueue_script( 'tvm-tv-js', TVM_URL . 'assets/js/tvm-tv.js', array( 'tvm-core-js' ), TVM_VERSION, true );
+		
+        // Prevent tvm-tv.js errors on single item pages
+        if ( ! is_singular( 'tvm_item' ) ) {
+            wp_enqueue_script( 'tvm-tv-js', TVM_URL . 'assets/js/tvm-tv.js', array( 'tvm-core-js' ), TVM_VERSION, true );
+        }
+
 		wp_enqueue_script( 'tvm-search-js', TVM_URL . 'assets/js/tvm-search.js', array( 'jquery', 'tvm-core-js' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-settings-js', TVM_URL . 'assets/js/tvm-settings.js', array( 'jquery', 'tvm-core-js' ), TVM_VERSION, true );
 
@@ -139,6 +178,7 @@ final class TVM_Tracker {
 		require_once TVM_PATH . 'includes/class-tvm-tv-handler.php';
 		require_once TVM_PATH . 'includes/class-tvm-tv-details.php';
 		require_once TVM_PATH . 'includes/class-tvm-importer.php';
+        require_once TVM_PATH . 'includes/class-tvm-weekly-mailer.php';
         
         // New Surgical Handler
         if ( file_exists( TVM_PATH . 'includes/class-tvm-tv-unwatched-handler.php' ) ) {
@@ -169,7 +209,11 @@ final class TVM_Tracker {
 		dbDelta( $sql );
 		update_option( 'tvm_version', TVM_VERSION );
         
-        // Ensure rewrites are flushed immediately upon activation
+        // Schedule the restored weekly mailer cron
+        if ( ! wp_next_scheduled( 'tvm_sunday_morning_email' ) ) {
+            wp_schedule_event( strtotime( 'next Sunday 6:00am' ), 'weekly', 'tvm_sunday_morning_email' );
+        }
+
         $this->register_rewrite_rules();
         flush_rewrite_rules();
 	}
