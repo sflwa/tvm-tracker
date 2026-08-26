@@ -188,10 +188,12 @@ final class TVM_Tracker {
 
 	public function activate_plugin() {
 		global $wpdb;
-		$table_name = $wpdb->prefix . 'tvm_user_progress';
 		$charset_collate = $wpdb->get_charset_collate();
+		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
-		$sql = "CREATE TABLE $table_name (
+		// 1. User Progress Table
+		$table_progress = $wpdb->prefix . 'tvm_user_progress';
+		$sql_progress = "CREATE TABLE $table_progress (
 			id bigint(20) NOT NULL AUTO_INCREMENT,
 			user_id bigint(20) NOT NULL,
 			item_id bigint(20) NOT NULL,
@@ -204,9 +206,23 @@ final class TVM_Tracker {
 			KEY user_id (user_id),
 			KEY item_id (item_id)
 		) $charset_collate;";
+		dbDelta( $sql_progress );
 
-		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-		dbDelta( $sql );
+		// 2. Series Stats Summary Table
+		$table_stats = $wpdb->prefix . 'tvm_series_stats';
+		$sql_stats = "CREATE TABLE $table_stats (
+			id bigint(20) NOT NULL AUTO_INCREMENT,
+			user_id bigint(20) NOT NULL,
+			item_id bigint(20) NOT NULL,
+			watched_count int(11) DEFAULT 0,
+			unwatched_count int(11) DEFAULT 0,
+			upcoming_count int(11) DEFAULT 0,
+			last_updated datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			PRIMARY KEY  (id),
+			UNIQUE KEY user_item (user_id, item_id)
+		) $charset_collate;";
+		dbDelta( $sql_stats );
+
 		update_option( 'tvm_version', TVM_VERSION );
         
         // Schedule the restored weekly mailer cron
