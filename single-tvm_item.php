@@ -26,6 +26,7 @@ while ( have_posts() ) :
 	$tvmaze_id   = get_post_meta( $post_id, '_tvm_tvmaze_id', true );
 	$tmdb_id     = get_post_meta( $post_id, '_tvm_tmdb_id', true );
 	$imdb_id     = get_post_meta( $post_id, '_tvm_imdb_id', true );
+	$tvdb_id     = get_post_meta( $post_id, '_tvm_tvdb_id', true );
 	$last_synced = get_post_meta( $post_id, '_tvm_last_sync', true );
 
 	// Formatted Meta Fields
@@ -34,7 +35,6 @@ while ( have_posts() ) :
 	$genres       = get_post_meta( $post_id, '_tvm_genres', true );
 	$release_date = get_post_meta( $post_id, '_tvm_release_date', true );
 	$poster_path  = get_post_meta( $post_id, '_tvm_poster_path', true );
-	$sources      = get_post_meta( $post_id, '_tvm_streaming_sources', true );
 
 	// Formatted Dates
 	$last_synced_formatted  = $last_synced ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $last_synced ) ) : __( 'Never', 'tvm-tracker' );
@@ -60,6 +60,12 @@ while ( have_posts() ) :
 			$post_id
 		) );
 	}
+
+	// Direct Link Construction
+	$tmdb_url   = $tmdb_id ? ( 'tv' === $media_type ? "https://www.themoviedb.org/tv/{$tmdb_id}" : "https://www.themoviedb.org/movie/{$tmdb_id}" ) : '';
+	$imdb_url   = $imdb_id ? "https://www.imdb.com/title/{$imdb_id}" : '';
+	$tvdb_url   = $tvdb_id ? "https://thetvdb.com/derefer/series/{$tvdb_id}" : '';
+	$tvmaze_url = $tvmaze_id ? "https://www.tvmaze.com/shows/{$tvmaze_id}" : '';
 
 	// Query User Progress Tracking
 	$progress_table = $wpdb->prefix . 'tvm_user_progress';
@@ -110,6 +116,43 @@ while ( have_posts() ) :
 						<?php endif; ?>
 					</div>
 
+					<!-- Database Sources Quick Links Card -->
+					<div class="tvm-sources-card" style="margin-top: 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;">
+						<h3 style="margin-top: 0; font-size: 1.05em; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+							<span class="dashicons dashicons-external" style="color: #0284c7;"></span> <?php _e( 'External Database Sources', 'tvm-tracker' ); ?>
+						</h3>
+						<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
+							<?php if ( $tmdb_url ) : ?>
+								<a href="<?php echo esc_url( $tmdb_url ); ?>" target="_blank" rel="noopener" class="button" style="display: flex; justify-content: space-between; align-items: center; background: #0d253f; color: #01b4e4; border: none; font-weight: 700;">
+									<span>TMDb</span> <span class="dashicons dashicons-external" style="font-size:14px; width:14px; height:14px;"></span>
+								</a>
+							<?php endif; ?>
+
+							<?php if ( $imdb_url ) : ?>
+								<a href="<?php echo esc_url( $imdb_url ); ?>" target="_blank" rel="noopener" class="button" style="display: flex; justify-content: space-between; align-items: center; background: #f5c518; color: #000; border: none; font-weight: 700;">
+									<span>IMDb</span> <span class="dashicons dashicons-external" style="font-size:14px; width:14px; height:14px;"></span>
+								</a>
+							<?php endif; ?>
+
+							<?php if ( $tvdb_url ) : ?>
+								<a href="<?php echo esc_url( $tvdb_url ); ?>" target="_blank" rel="noopener" class="button" style="display: flex; justify-content: space-between; align-items: center; background: #2f3640; color: #353b48; border: none; font-weight: 700; color: #2ecc71;">
+									<span>TVDB</span> <span class="dashicons dashicons-external" style="font-size:14px; width:14px; height:14px;"></span>
+								</a>
+							<?php endif; ?>
+
+							<?php if ( $tvmaze_url ) : ?>
+								<a href="<?php echo esc_url( $tvmaze_url ); ?>" target="_blank" rel="noopener" class="button" style="display: flex; justify-content: space-between; align-items: center; background: #317589; color: #fff; border: none; font-weight: 700;">
+									<span>TVmaze</span> <span class="dashicons dashicons-external" style="font-size:14px; width:14px; height:14px;"></span>
+								</a>
+							<?php endif; ?>
+
+							<?php if ( ! $tmdb_url && ! $imdb_url && ! $tvdb_url && ! $tvmaze_url ) : ?>
+								<p style="font-size: 0.85em; color: #94a3b8; margin: 0; font-style: italic;"><?php _e( 'No external database IDs configured.', 'tvm-tracker' ); ?></p>
+							<?php endif; ?>
+						</div>
+					</div>
+
+					<!-- Details & Specs Card -->
 					<div class="tvm-info-card" style="margin-top: 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;">
 						<h3 style="margin-top: 0; font-size: 1.1em; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; color: #1e293b; display: flex; align-items: center; gap: 8px;">
 							<span class="dashicons dashicons-info" style="color: #0284c7;"></span> <?php _e( 'Details & Specs', 'tvm-tracker' ); ?>
@@ -149,9 +192,36 @@ while ( have_posts() ) :
 						</ul>
 					</div>
 
+					<!-- Database ID Edit Form Card -->
+					<div class="tvm-admin-card" style="margin-top: 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px;">
+						<h4 style="margin-top: 0; font-size: 1em; color: #334155; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;"><?php _e( 'Edit Database IDs', 'tvm-tracker' ); ?></h4>
+						<form id="tvm-edit-ids-form" style="margin-top: 10px;">
+							<div style="margin-bottom: 10px;">
+								<label style="display: block; font-size: 0.8em; font-weight: 700; color: #475569; margin-bottom: 2px;">TMDb ID</label>
+								<input type="text" name="tmdb_id" value="<?php echo esc_attr( $tmdb_id ); ?>" style="width: 100%; height: 32px; border-radius: 4px; border: 1px solid #cbd5e1; padding: 0 8px; font-size: 0.85em;">
+							</div>
+							<div style="margin-bottom: 10px;">
+								<label style="display: block; font-size: 0.8em; font-weight: 700; color: #475569; margin-bottom: 2px;">TVDB ID</label>
+								<input type="text" name="tvdb_id" value="<?php echo esc_attr( $tvdb_id ); ?>" style="width: 100%; height: 32px; border-radius: 4px; border: 1px solid #cbd5e1; padding: 0 8px; font-size: 0.85em;">
+							</div>
+							<div style="margin-bottom: 10px;">
+								<label style="display: block; font-size: 0.8em; font-weight: 700; color: #475569; margin-bottom: 2px;">IMDb ID</label>
+								<input type="text" name="imdb_id" value="<?php echo esc_attr( $imdb_id ); ?>" style="width: 100%; height: 32px; border-radius: 4px; border: 1px solid #cbd5e1; padding: 0 8px; font-size: 0.85em;">
+							</div>
+							<div style="margin-bottom: 12px;">
+								<label style="display: block; font-size: 0.8em; font-weight: 700; color: #475569; margin-bottom: 2px;">TVmaze ID</label>
+								<input type="text" name="tvmaze_id" value="<?php echo esc_attr( $tvmaze_id ); ?>" style="width: 100%; height: 32px; border-radius: 4px; border: 1px solid #cbd5e1; padding: 0 8px; font-size: 0.85em;">
+							</div>
+							<button type="submit" class="button button-secondary" style="width: 100%; font-weight: 600;">
+								<span class="dashicons dashicons-saved" style="vertical-align: middle; font-size: 16px;"></span> <?php _e( 'Save & Resync IDs', 'tvm-tracker' ); ?>
+							</button>
+						</form>
+						<div class="tvm-id-save-msg" style="margin-top: 8px; font-size: 0.85em; font-weight: 600;"></div>
+					</div>
+
 					<!-- Database Utilities Card -->
 					<div class="tvm-admin-card" style="margin-top: 20px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 12px; padding: 20px;">
-						<h4 style="margin-top: 0; font-size: 1em; color: #334155;"><?php _e( 'Admin Control', 'tvm-tracker' ); ?></h4>
+						<h4 style="margin-top: 0; font-size: 1em; color: #334155;"><?php _e( 'Admin Controls', 'tvm-tracker' ); ?></h4>
 						<p style="font-size: 0.85em; color: #64748b; margin-bottom: 12px;">
 							<strong><?php _e( 'Last Synced:', 'tvm-tracker' ); ?></strong><br>
 							<span><?php echo esc_html( $last_synced_formatted ); ?></span>
@@ -256,6 +326,40 @@ while ( have_posts() ) :
 	<!-- Admin Control Button Handlers -->
 	<script type="text/javascript">
 		jQuery(document).ready(function($) {
+			// Save & Resync IDs Form Handler
+			$('#tvm-edit-ids-form').on('submit', function(e) {
+				e.preventDefault();
+
+				var $msg = $('.tvm-id-save-msg');
+				var showId = <?php echo (int) $post_id; ?>;
+				var formData = $(this).serializeArray();
+				
+				formData.push({ name: 'action', value: 'tvm_update_item_ids' });
+				formData.push({ name: 'post_id', value: showId });
+				formData.push({ name: 'nonce', value: tvm_app.nonce });
+
+				$msg.text('Saving and resyncing metadata...').css('color', '#64748b');
+
+				$.ajax({
+					url: tvm_app.ajax_url,
+					type: 'POST',
+					data: formData,
+					success: function(response) {
+						if (response.success) {
+							$msg.text('IDs updated & synced! Reloading...').css('color', '#16a34a');
+							setTimeout(function() {
+								location.reload();
+							}, 1000);
+						} else {
+							$msg.text(response.data || 'Failed to update IDs.').css('color', '#dc2626');
+						}
+					},
+					error: function() {
+						$msg.text('Communication error.').css('color', '#dc2626');
+					}
+				});
+			});
+
 			// Force Sync Metadata Handler
 			$('.tvm-force-sync-btn').on('click', function(e) {
 				e.preventDefault();

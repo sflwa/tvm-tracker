@@ -3,7 +3,7 @@
  * Plugin Name:       TV & Movie Tracker
  * Plugin URI:        https://sflwa.com/
  * Description:       A premium personal library for tracking TV shows and Movies.
- * Version:           2.1.1
+ * Version:           2.3.2
  * Author:            South Florida Web Advisors
  * License:           GPLv2 or later
  * Text Domain:       tvm-tracker
@@ -13,9 +13,34 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'TVM_VERSION', '2.1.1' );
+define( 'TVM_VERSION', '2.3.2' );
 define( 'TVM_PATH', plugin_dir_path( __FILE__ ) );
 define( 'TVM_URL', plugin_dir_url( __FILE__ ) );
+
+
+
+// Include the shared support handler
+require_once plugin_dir_path( __FILE__ ) . 'sflwa-support-handler.php';
+
+// Register this plugin into the SFLWA Support Hub
+sflwa_register_support_page( array(
+    'plugin_name'   => 'TV & Movie Tracker',
+    'plugin_slug'   => 'tvm-tracker',
+    'text_domain'   => 'tvm-tracker',
+    'plugin_file'   => __FILE__,
+    'submenu_title' => 'TV & Movie Tracker',
+    'description'   => 'A premium personal library for tracking TV shows and Movies.',
+    'version'       => '2.3.2'
+) );
+
+
+
+
+
+
+
+
+
 
 final class TVM_Tracker {
 
@@ -36,7 +61,6 @@ final class TVM_Tracker {
 			$this->tmdb = new TVM_API_TMDB();
 		}
 
-		// Register custom cron schedules
 		add_filter( 'cron_schedules', array( $this, 'add_custom_cron_intervals' ) );
 
 		add_action( 'init', function() {
@@ -44,12 +68,9 @@ final class TVM_Tracker {
 				$cpt = new TVM_CPT();
 				$cpt->register_post_types();
 			}
-            
-            // Register Custom Rewrite Rules for Dedicated Views
             $this->register_rewrite_rules();
 		});
 
-        // Add query variables to WordPress
         add_filter( 'query_vars', array( $this, 'register_query_vars' ) );
 
 		if ( class_exists( 'TVM_Admin_Search' ) ) {
@@ -66,19 +87,11 @@ final class TVM_Tracker {
 
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		register_activation_hook( __FILE__, array( $this, 'activate_plugin' ) );
-        
-        // Flush rewrites on activation
         register_activation_hook( __FILE__, 'flush_rewrite_rules' );
-
-		// Load custom templates for single and archive tvm_item CPT
 		add_filter( 'template_include', array( $this, 'load_cpt_templates' ) );
 	}
 
-    /**
-     * Load custom templates for tvm_item post type (Single and Archive)
-     */
     public function load_cpt_templates( $template ) {
-        // 1. Single TV/Movie Item Template
         if ( is_singular( 'tvm_item' ) ) {
             $theme_template = locate_template( array( 'single-tvm_item.php' ) );
             if ( $theme_template ) {
@@ -91,7 +104,6 @@ final class TVM_Tracker {
             }
         }
 
-        // 2. Master Library Archive Index Template
         if ( is_post_type_archive( 'tvm_item' ) ) {
             $theme_archive = locate_template( array( 'archive-tvm_item.php' ) );
             if ( $theme_archive ) {
@@ -107,31 +119,29 @@ final class TVM_Tracker {
         return $template;
     }
 
-    /**
-     * Register custom URL segments for dedicated views
-     */
     public function register_rewrite_rules() {
-        add_rewrite_rule( 
-            'test/tv-unwatched/?$', 
-            'index.php?page_id=20840&tvm_view=tv-unwatched', 
-            'top' 
-        );
+        // Front-page & Subpage rewrite routing rules
+        $front_id = get_option( 'page_on_front' );
+        $target   = $front_id ? 'index.php?page_id=' . absint( $front_id ) : 'index.php?';
+
+        add_rewrite_rule( '^tv/(watched|unwatched|released|upcoming|calendar)/?$', $target . '&tvm_media=tv&tvm_filter=$matches[1]', 'top' );
+        add_rewrite_rule( '^tv/([^/]+)/?$', $target . '&tvm_media=tv&tvm_show_slug=$matches[1]', 'top' );
+        add_rewrite_rule( '^tv/?$', $target . '&tvm_media=tv', 'top' );
+
+        add_rewrite_rule( '^movies/(watched|released|upcoming)/?$', $target . '&tvm_media=movies&tvm_filter=$matches[1]', 'top' );
+        add_rewrite_rule( '^movies/?$', $target . '&tvm_media=movies', 'top' );
     }
 
-    /**
-     * Add tvm_view to the allowed WordPress query variables
-     */
     public function register_query_vars( $vars ) {
-        $vars[] = 'tvm_view';
+        $vars[] = 'tvm_media';
+        $vars[] = 'tvm_filter';
+        $vars[] = 'tvm_show_slug';
         return $vars;
     }
 
-	/**
-	 * Define custom monthly interval for WP-Cron
-	 */
 	public function add_custom_cron_intervals( $schedules ) {
 		$schedules['monthly'] = array(
-			'interval' => 2635200, // 30.5 days in seconds
+			'interval' => 2635200,
 			'display'  => __( 'Once Every Month', 'tvm-tracker' )
 		);
 		return $schedules;
@@ -144,7 +154,6 @@ final class TVM_Tracker {
 		wp_enqueue_script( 'tvm-core-js', TVM_URL . 'assets/js/tvm-core.js', array( 'jquery' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-movie-js', TVM_URL . 'assets/js/tvm-movie.js', array( 'tvm-core-js' ), TVM_VERSION, true );
 		
-        // Prevent tvm-tv.js errors on single item pages
         if ( ! is_singular( 'tvm_item' ) ) {
             wp_enqueue_script( 'tvm-tv-js', TVM_URL . 'assets/js/tvm-tv.js', array( 'tvm-core-js' ), TVM_VERSION, true );
         }
@@ -152,15 +161,16 @@ final class TVM_Tracker {
 		wp_enqueue_script( 'tvm-search-js', TVM_URL . 'assets/js/tvm-search.js', array( 'jquery', 'tvm-core-js' ), TVM_VERSION, true );
 		wp_enqueue_script( 'tvm-settings-js', TVM_URL . 'assets/js/tvm-settings.js', array( 'jquery', 'tvm-core-js' ), TVM_VERSION, true );
 
-        // Conditionally load the new dedicated Unwatched script
         if ( get_query_var( 'tvm_view' ) === 'tv-unwatched' ) {
             wp_enqueue_script( 'tvm-tv-unwatched-js', TVM_URL . 'assets/js/tvm-tv-unwatched.js', array( 'jquery', 'tvm-core-js' ), TVM_VERSION, true );
         }
 		
 		wp_localize_script( 'tvm-core-js', 'tvm_app', array(
-			'ajax_url' => admin_url( 'admin-ajax.php' ),
-			'nonce'    => wp_create_nonce( 'tvm_import_nonce' ),
-            'current_view' => get_query_var( 'tvm_view' ),
+			'ajax_url'      => admin_url( 'admin-ajax.php' ),
+			'nonce'         => wp_create_nonce( 'tvm_import_nonce' ),
+            'current_media' => get_query_var( 'tvm_media' ) ?: 'tv',
+            'current_filter'=> get_query_var( 'tvm_filter' ) ?: 'all',
+            'current_show'  => get_query_var( 'tvm_show_slug' ) ?: '',
 		));
 	}
 
@@ -180,7 +190,6 @@ final class TVM_Tracker {
 		require_once TVM_PATH . 'includes/class-tvm-importer.php';
         require_once TVM_PATH . 'includes/class-tvm-weekly-mailer.php';
         
-        // New Surgical Handler
         if ( file_exists( TVM_PATH . 'includes/class-tvm-tv-unwatched-handler.php' ) ) {
             require_once TVM_PATH . 'includes/class-tvm-tv-unwatched-handler.php';
         }
@@ -191,7 +200,6 @@ final class TVM_Tracker {
 		$charset_collate = $wpdb->get_charset_collate();
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
-		// 1. User Progress Table
 		$table_progress = $wpdb->prefix . 'tvm_user_progress';
 		$sql_progress = "CREATE TABLE $table_progress (
 			id bigint(20) NOT NULL AUTO_INCREMENT,
@@ -208,7 +216,6 @@ final class TVM_Tracker {
 		) $charset_collate;";
 		dbDelta( $sql_progress );
 
-		// 2. Series Stats Summary Table
 		$table_stats = $wpdb->prefix . 'tvm_series_stats';
 		$sql_stats = "CREATE TABLE $table_stats (
 			id bigint(20) NOT NULL AUTO_INCREMENT,
@@ -225,7 +232,6 @@ final class TVM_Tracker {
 
 		update_option( 'tvm_version', TVM_VERSION );
         
-        // Schedule the restored weekly mailer cron
         if ( ! wp_next_scheduled( 'tvm_sunday_morning_email' ) ) {
             wp_schedule_event( strtotime( 'next Sunday 6:00am' ), 'weekly', 'tvm_sunday_morning_email' );
         }
