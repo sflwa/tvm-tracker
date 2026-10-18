@@ -1,19 +1,86 @@
 /**
  * TV & Movie Tracker - TV Module
- * Version: 1.7.4 - UI Update: Per-episode progress bar integration
+ * Version: 2.1.0 - Relative Sub-Path Routing, State Preservation & Calendar Redesign
  * Author: South Florida Web Advisors
  */
 jQuery(function($) {
     const TVModule = {
         currentMonth: new Date(),
         calendarEvents: [],
+        calendarMode: 'month',
         activeCalendarDate: null,
         activeUnwatchedId: null,
+        previousFilter: 'all',
 
         init: function() {
+            if (typeof tvm_app === 'undefined') {
+                console.error('TVM Tracker: tvm_app global object is missing.');
+                return;
+            }
+
+            this.slugify = function(text) {
+                return text ? text.toString().toLowerCase()
+                    .replace(/\s+/g, '-')
+                    .replace(/[^\w\-]+/g, '')
+                    .replace(/\-\-+/g, '-')
+                    .replace(/^-+/, '')
+                    .replace(/-+$/, '') : '';
+            };
+
+            // Dynamically inspect relative sub-paths from the page location
+            this.parseUrlPath = function() {
+                const pathParts = window.location.pathname.split('/').filter(Boolean);
+                let filter = 'all';
+                let showSlug = '';
+
+                if (pathParts.length > 0) {
+                    const lastPart = pathParts[pathParts.length - 1];
+                    const secondLastPart = pathParts.length > 1 ? pathParts[pathParts.length - 2] : '';
+
+                    if (['watched', 'unwatched', 'released', 'upcoming', 'calendar'].includes(lastPart)) {
+                        filter = (lastPart === 'unwatched') ? 'released' : lastPart;
+                    } else if (secondLastPart === 'tv' || pathParts.length >= 1) {
+                        // Look for a potential show slug
+                        if (!['tv', 'movies', 'watched', 'unwatched', 'released', 'upcoming', 'calendar'].includes(lastPart)) {
+                            showSlug = lastPart;
+                        }
+                    }
+                }
+
+                return { filter: filter, showSlug: showSlug };
+            };
+
+            // Calculate current base URL path where shortcode lives
+            this.getBasePath = function() {
+                let path = window.location.pathname;
+                // Strip known sub-routes from path
+                path = path.replace(/\/(tv|movies)\/(watched|unwatched|released|upcoming|calendar)\/?$/i, '/');
+                path = path.replace(/\/(tv|movies)\/([^\/]+)\/?$/i, '/');
+                path = path.replace(/\/(tv|movies)\/?$/i, '/');
+                if (!path.endsWith('/')) path += '/';
+                return path;
+            };
+
+            window.addEventListener('popstate', (e) => {
+                const state = this.parseUrlPath();
+                if (state.showSlug) {
+                    this.loadAndShowSeries(state.showSlug);
+                } else {
+                    $('#tvm-tv-detail-view').hide();
+                    $('#tvm-watchlist-grid, .tvm-filters-container').show();
+                    const restoreFilter = (e.state && e.state.filter) ? e.state.filter : state.filter;
+                    this.switchToFilter(restoreFilter, false);
+                }
+            });
+
             setTimeout(() => {
-                if (window.location.hash === '#tv-unwatched') this.switchToFilter('released');
-                else if (window.location.hash === '#tv-calendar') this.switchToFilter('calendar');
+                const state = this.parseUrlPath();
+                if (state.showSlug) {
+                    window.current_media_type = 'tv';
+                    this.loadAndShowSeries(state.showSlug);
+                } else if (state.filter && state.filter !== 'all') {
+                    this.switchToFilter(state.filter, false);
+                }
             }, 200);
 
             $(document).on('tvm_settings_ready', () => {
@@ -25,6 +92,12 @@ jQuery(function($) {
 
             $(document).on('tvm_tab_switch', (e, tab) => {
                 if (tab === 'watchlist' && window.current_media_type === 'tv') {
+                    const state = this.parseUrlPath();
+                    if (state.showSlug) {
+                        this.loadAndShowSeries(state.showSlug);
+                        return;
+                    }
+
                     const currentFilter = $('.tvm-filter-btn.active').data('filter');
                     if (currentFilter === 'calendar') {
                         this.renderCalendarView();
@@ -36,6 +109,8 @@ jQuery(function($) {
 
             $(document).on('tvm_filter_change', (e, filter) => {
                 if (window.current_media_type === 'tv') {
+                    this.previousFilter = filter;
+                    this.updateUrlRoute('tv', filter);
                     if (filter === 'calendar') {
                         this.activeUnwatchedId = null; 
                         this.renderCalendarView();
@@ -45,10 +120,22 @@ jQuery(function($) {
                 }
             });
 
+            // Calendar Controls
             $(document).on('click', '.tvm-cal-nav', (e) => {
                 const dir = $(e.currentTarget).data('dir');
-                this.currentMonth.setMonth(this.currentMonth.getMonth() + (dir === 'next' ? 1 : -1));
+                if (this.calendarMode === 'week') {
+                    this.currentMonth.setDate(this.currentMonth.getDate() + (dir === 'next' ? 7 : -7));
+                } else {
+                    this.currentMonth.setMonth(this.currentMonth.getMonth() + (dir === 'next' ? 1 : -1));
+                }
                 this.activeCalendarDate = null;
+                this.renderCalendarView();
+            });
+
+            $(document).on('click', '.tvm-cal-mode-btn', (e) => {
+                const mode = $(e.currentTarget).data('mode');
+                $('.tvm-cal-mode-btn').removeClass('active');$(e.currentTarget).addClass('active');
+                this.calendarMode = mode;
                 this.renderCalendarView();
             });
 
@@ -64,32 +151,35 @@ jQuery(function($) {
                 const id = $(e.currentTarget).data('id');
                 const filter = $('.tvm-filter-btn.active').data('filter');
                 
+                this.previousFilter = filter || 'all';
+
                 if (filter === 'released' && $(window).width() >= 800) {
                     this.activeUnwatchedId = id;
                     this.showInlineEpisodes(id);
-                    $('html, body').animate({ scrollTop: $('#tvm-unwatched-inline-container').offset().top - 100 }, 500);
+                    $('html, body').animate({ scrollTop:$('#tvm-unwatched-inline-container').offset().top - 100 }, 500);
                 } else {
-                    this.showSeriesDetails(id);
+                    this.showSeriesDetails(id, true);
                 }
             });
 
+            // Back to List Handler (Preserving Prior Filter View)
             $(document).on('click', '#tvm-back-to-grid', (e) => {
                 e.preventDefault();
+                const targetFilter = this.previousFilter || 'all';
+                this.switchToFilter(targetFilter, true);
                 $('#tvm-tv-detail-view').hide();
                 $('#tvm-watchlist-grid, .tvm-filters-container').show();
             });
 
             $(document).on('click', '.tvm-season-tab', (e) => {
-                const $tab = $(e.currentTarget);
-                $('.tvm-season-tab').removeClass('active').css({'background': '#f5f5f5', 'color': '#666'});
+                const $tab = $(e.currentTarget);$('.tvm-season-tab').removeClass('active').css({'background': '#f5f5f5', 'color': '#666'});
                 $tab.addClass('active').css({'background': '#2271b1', 'color': '#fff'});
-                $('.tvm-season-content-group').hide();
-                $(`#tvm-season-group-${$tab.data('season')}`).show();
+                $('.tvm-season-content-group').hide();$(`#tvm-season-group-${$tab.data('season')}`).show();
             });
 
             $(document).on('click', '.tvm-mark-season-watched', async (e) => {
-                const $btn = $(e.currentTarget);
-                const $group = $btn.closest('.tvm-season-content-group');
+                const $btn =$(e.currentTarget);
+                const $group =$btn.closest('.tvm-season-content-group');
                 const unwatchedItems = $group.find('.tvm-ep-watch[data-watched="true"]');
                 
                 if (unwatchedItems.length === 0) return;
@@ -97,8 +187,7 @@ jQuery(function($) {
                 
                 $btn.prop('disabled', true).text('Processing...');
                 for (let i = 0; i < unwatchedItems.length; i++) {
-                    const epId = $(unwatchedItems[i]).data('id');
-                    $(`#ep-row-${epId}`).addClass('is-updating'); // Trigger individual progress bar
+                    const epId = $(unwatchedItems[i]).data('id');$(`#ep-row-${epId}`).addClass('is-updating');
                     await $.post(tvm_app.ajax_url, { action: 'tvm_toggle_episode_watched', episode_id: epId, watched: 'true', nonce: tvm_app.nonce });
                 }
                 
@@ -108,11 +197,10 @@ jQuery(function($) {
             });
 
             $(document).on('click', '.tvm-ep-watch', (e) => {
-                const $btn = $(e.currentTarget);
+                const $btn =$(e.currentTarget);
                 const epId = $btn.data('id');
-                const $row = $(`#ep-row-${epId}`);
+                const $row =$(`#ep-row-${epId}`);
 
-                // Trigger individual row progress bar animation
                 $row.addClass('is-updating');
 
                 $.post(tvm_app.ajax_url, { 
@@ -148,7 +236,7 @@ jQuery(function($) {
 
             $(document).on('click', '.tvm-dropdown-nav', (e) => {
                 const dir = $(e.currentTarget).data('dir');
-                const $d = $('#tvm-unwatched-dropdown');
+                const $d =$('#tvm-unwatched-dropdown');
                 const idx = $d.prop('selectedIndex');
                 const total = $d.find('option').length;
                 let next = (dir === 'next') ? (idx >= total - 1 ? 1 : idx + 1) : (idx <= 1 ? total - 1 : idx - 1);
@@ -163,42 +251,78 @@ jQuery(function($) {
             });
 
             $(document).on('click', '#tvm-sync-episodes', (e) => {
-                const $btn = $(e.currentTarget);
-                $btn.prop('disabled', true).text('Syncing...');
-                $.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: $btn.data('id'), nonce: tvm_app.nonce }, (res) => {
-                    $btn.prop('disabled', false).text('Sync Metadata');
+                const $btn =$(e.currentTarget);
+                $btn.prop('disabled', true).text('Syncing...');$.post(tvm_app.ajax_url, { action: 'tvm_sync_series', post_id: $btn.data('id'), nonce: tvm_app.nonce }, (res) => {$btn.prop('disabled', false).text('Sync Metadata');
                     if (res.success) { alert(res.data); this.load(); this.loadEpisodes($btn.data('id')); }
                 });
             });
-			
-			
-			$(document).on('click', '#tvm-update-series-status', (e) => {
-    const $btn = $(e.currentTarget);
-    const seriesId = $btn.data('id');
-    
-    $btn.prop('disabled', true).text('Updating Status...');
-    
-    $.post(tvm_app.ajax_url, { 
-        action: 'tvm_sync_series_status', 
-        post_id: seriesId, 
-        nonce: tvm_app.nonce // Utilizes standard TVM validation context
-    }, (res) => {
-        $btn.prop('disabled', false).text('Update Status Only');
-        if (res.success) { 
-            alert(res.data); 
-            this.load(); // Refresh cache array
-            this.showSeriesDetails(seriesId); // Redraw interface wrapper variables
-        } else {
-            alert('Error updating status: ' + res.data);
-        }
-    });
-});
+            
+            $(document).on('click', '#tvm-update-series-status', (e) => {
+                const $btn =$(e.currentTarget);
+                const seriesId = $btn.data('id');
+                
+                $btn.prop('disabled', true).text('Updating Status...');$.post(tvm_app.ajax_url, { 
+                    action: 'tvm_sync_series_status', 
+                    post_id: seriesId, 
+                    nonce: tvm_app.nonce
+                }, (res) => {
+                    $btn.prop('disabled', false).text('Update Status Only');
+                    if (res.success) { 
+                        alert(res.data); 
+                        this.load(); 
+                        this.showSeriesDetails(seriesId, false); 
+                    } else {
+                        alert('Error updating status: ' + res.data);
+                    }
+                });
+            });
         },
 
-        switchToFilter: function(filterName) {
-            $('.tvm-filter-btn').removeClass('active');
-            $(`.tvm-filter-btn[data-filter="${filterName}"]`).addClass('active');
-            if (filterName === 'calendar') this.renderCalendarView();
+        updateUrlRoute: function(media, pathSegment) {
+            try {
+                if (window.history && window.history.pushState) {
+                    const base = this.getBasePath();
+                    let cleanPath = base + media + '/';
+                    if (pathSegment && pathSegment !== 'all') {
+                        const filterSlug = (pathSegment === 'released') ? 'unwatched' : pathSegment;
+                        cleanPath += filterSlug + '/';
+                    }
+                    window.history.pushState({ media: media, filter: pathSegment }, '', cleanPath);
+                }
+            } catch (e) {
+                console.error('TVM Tracker updateUrlRoute error:', e);
+            }
+        },
+
+        loadAndShowSeries: function(showSlug) {
+            TVM_Core.showLoading();
+            $.post(tvm_app.ajax_url, { action: 'tvm_get_tv_watchlist', nonce: tvm_app.nonce }, (res) => {
+                TVM_Core.hideLoading();
+                if (res.success) {
+                    window.tvm_tv_cache = res.data.items;
+                    
+                    const match = res.data.items.find(i => 
+                        i.id == showSlug || this.slugify(i.title) === showSlug.toString().toLowerCase()
+                    );
+
+                    if (match) {
+                        this.showSeriesDetails(match.id, false);
+                    } else {
+                        this.load();
+                    }
+                }
+            });
+        },
+
+        switchToFilter: function(filterName, updateUrl = true) {
+            const mappedFilter = (filterName === 'unwatched') ? 'released' : filterName;
+            $('.tvm-filter-btn').removeClass('active');$(`.tvm-filter-btn[data-filter="${mappedFilter}"]`).addClass('active');
+
+            if (updateUrl) {
+                this.updateUrlRoute('tv', mappedFilter);
+            }
+
+            if (mappedFilter === 'calendar') this.renderCalendarView();
             else this.load();
         },
 
@@ -216,7 +340,7 @@ jQuery(function($) {
 
         applyFilter: function() {
             const filter = $('.tvm-filter-btn.active').data('filter') || 'all';
-            const search = $('#tvm-vault-search-input').val().toLowerCase();
+            const search = $('#tvm-vault-search-input').val() ? $('#tvm-vault-search-input').val().toLowerCase() : '';
             const streamOnly = $('#tvm-stream-only-toggle').is(':checked'); 
             let items = [...(window.tvm_tv_cache || [])];
             
@@ -242,9 +366,38 @@ jQuery(function($) {
                 TVM_Core.hideLoading();
                 if (res.success) {
                     this.calendarEvents = res.data;
-                    this.buildCalendarGrid();
+                    if (this.calendarMode === 'week') {
+                        this.buildWeekCalendarGrid();
+                    } else {
+                        this.buildCalendarGrid();
+                    }
                 }
             });
+        },
+
+        buildCalendarHeader: function(titleText) {
+            return `
+            <div class="tvm-calendar-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <button type="button" class="tvm-cal-nav button button-secondary" data-dir="prev" style="display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px;">
+                        <span class="dashicons dashicons-arrow-left-alt2"></span>
+                    </button>
+                    <h2 style="margin:0; font-size:22px; font-weight:800; color:#0f172a;">${titleText}</h2>
+                    <button type="button" class="tvm-cal-nav button button-secondary" data-dir="next" style="display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px;">
+                        <span class="dashicons dashicons-arrow-right-alt2"></span>
+                    </button>
+                </div>
+                <div style="display:flex; align-items:center; gap:15px;">
+                    <div style="display:flex; gap:12px; font-size:12px; font-weight:600; color:#64748b;">
+                        <span><span style="color:#d97706;">●</span> Unwatched</span>
+                        <span><span style="color:#16a34a;">✓</span> Watched</span>
+                    </div>
+                    <div class="tvm-cal-mode-switcher" style="background:#f1f5f9; padding:3px; border-radius:8px; display:flex; gap:2px;">
+                        <button type="button" class="tvm-cal-mode-btn ${this.calendarMode === 'month' ? 'active' : ''}" data-mode="month" style="border:none; background:transparent; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;">Month</button>
+                        <button type="button" class="tvm-cal-mode-btn ${this.calendarMode === 'week' ? 'active' : ''}" data-mode="week" style="border:none; background:transparent; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;">Week</button>
+                    </div>
+                </div>
+            </div>`;
         },
 
         buildCalendarGrid: function() {
@@ -257,11 +410,7 @@ jQuery(function($) {
 
             let html = `
             <div class="tvm-calendar-container">
-                <div class="tvm-calendar-header">
-                    <span class="dashicons dashicons-arrow-left-alt2 tvm-cal-nav" data-dir="prev" style="cursor:pointer;"></span>
-                    <span>${monthNames[month]} ${year}</span>
-                    <span class="dashicons dashicons-arrow-right-alt2 tvm-cal-nav" data-dir="next" style="cursor:pointer;"></span>
-                </div>
+                ${this.buildCalendarHeader(`${monthNames[month]}${year}`)}
                 <div class="tvm-calendar-grid">
                     <div class="tvm-calendar-day-label">SUN</div><div class="tvm-calendar-day-label">MON</div>
                     <div class="tvm-calendar-day-label">TUE</div><div class="tvm-calendar-day-label">WED</div>
@@ -277,10 +426,17 @@ jQuery(function($) {
                 
                 let listHtml = '', dotsHtml = '';
                 dayEvents.forEach(ev => {
-                    const iconClass = ev.is_watched ? 'dashicons-visibility' : 'dashicons-hidden';
-                    const iconColor = ev.is_watched ? '#46b450' : '#ccc';
-                    listHtml += `<div class="tvm-cal-ep-item"><span style="font-weight:700; color:#2271b1;">${ev.series}</span><div style="display:flex; align-items:center; gap:4px;"><span>(${ev.display})</span><span class="dashicons ${iconClass} tvm-ep-watch" data-id="${ev.id}" data-watched="${!ev.is_watched}" style="cursor:pointer; font-size:14px; width:14px; height:14px; color:${iconColor};"></span></div></div>`;
-                    dotsHtml += `<div class="tvm-calendar-dot ${ev.is_watched ? 'watched' : ''}"></div>`;
+                    const statusClass = ev.is_watched ? 'watched' : 'unwatched';
+                    const symbol = ev.is_watched ? '✓' : '●';
+                    
+                    listHtml += `
+                    <div class="tvm-cal-ep-item" title="${ev.series} (${ev.display}): ${ev.title}">
+                        <span class="tvm-cal-show-title">${ev.series}</span>
+                        <button type="button" class="tvm-cal-ep-pill ${statusClass} tvm-ep-watch" data-id="${ev.id}" data-watched="${!ev.is_watched}">
+                            <span>${symbol}</span> ${ev.display}
+                        </button>
+                    </div>`;
+                    dotsHtml += `<div class="tvm-calendar-dot ${statusClass}"></div>`;
                 });
 
                 html += `<div class="tvm-calendar-day ${isToday}" data-date="${dateStr}"><span class="tvm-calendar-date">${day}</span><div class="tvm-cal-desktop-list">${listHtml}</div><div class="tvm-calendar-dots">${dotsHtml}</div></div>`;
@@ -292,6 +448,65 @@ jQuery(function($) {
             if (this.activeCalendarDate) {
                 this.showDayDetails(this.activeCalendarDate);
             }
+        },
+
+        buildWeekCalendarGrid: function() {
+            const curr = new Date(this.currentMonth);
+            const first = curr.getDate() - curr.getDay();
+            const today = new Date().toISOString().split('T')[0];
+
+            const weekDays = [];
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(curr.setDate(first + i));
+                weekDays.push(d);
+            }
+
+            const dayNames = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            
+            const startLabel = `${monthNames[weekDays[0].getMonth()]} ${weekDays[0].getDate()}`;
+            const endLabel = `${monthNames[weekDays[6].getMonth()]} ${weekDays[6].getDate()}, ${weekDays[6].getFullYear()}`;
+
+            let html = `
+            <div class="tvm-calendar-container">
+                ${this.buildCalendarHeader(`${startLabel} –${endLabel}`)}
+                <div class="tvm-week-grid" style="display:grid; grid-template-columns:repeat(7, 1fr); gap:10px;">`;
+
+            weekDays.forEach(dayObj => {
+                const dateStr = dayObj.toISOString().split('T')[0];
+                const isToday = dateStr === today ? 'today' : '';
+                const dayEvents = this.calendarEvents.filter(e => e.air_date === dateStr);
+
+                let listHtml = '';
+                if (dayEvents.length > 0) {
+                    dayEvents.forEach(ev => {
+                        const statusClass = ev.is_watched ? 'watched' : 'unwatched';
+                        const symbol = ev.is_watched ? '✓' : '●';
+                        listHtml += `
+                        <div class="tvm-cal-ep-item" title="${ev.series} (${ev.display}): ${ev.title}" style="margin-bottom:8px;">
+                            <span class="tvm-cal-show-title">${ev.series}</span>
+                            <button type="button" class="tvm-cal-ep-pill ${statusClass} tvm-ep-watch" data-id="${ev.id}" data-watched="${!ev.is_watched}">
+                                <span>${symbol}</span> ${ev.display}
+                            </button>
+                        </div>`;
+                    });
+                } else {
+                    listHtml = `<div style="font-size:11px; color:#94a3b8; font-style:italic; padding-top:10px;">Nothing airing</div>`;
+                }
+
+                html += `
+                <div class="tvm-week-day-card ${isToday}" data-date="${dateStr}" style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:12px;">
+                    <div style="font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; margin-bottom:4px;">
+                        ${dayNames[dayObj.getDay()]} <span style="font-size:16px; color:#0f172a; display:inline-block; margin-left:4px;">${dayObj.getDate()}</span>
+                    </div>
+                    <div class="tvm-week-events" style="margin-top:10px;">
+                        ${listHtml}
+                    </div>
+                </div>`;
+            });
+
+            html += `</div><div id="tvm-calendar-details" style="margin-top:25px;"></div></div>`;
+            $('#tvm-watchlist-grid').removeClass('tvm-locked-grid').html(html);
         },
 
         showDayDetails: function(date) {
@@ -319,7 +534,7 @@ jQuery(function($) {
 
         render: function(items, isUnwatchedView) {
             const currentShows = items.filter(i => ['Returning Series', 'Unknown', 'Running'].includes(i.status));
-            const futureShows  = items.filter(i => ['In Production',,'In Development','Planned'].includes(i.status));
+            const futureShows  = items.filter(i => ['In Production', 'In Development', 'Planned'].includes(i.status));
             const oldShows      = items.filter(i => ['Ended', 'Canceled'].includes(i.status));
 
             const buildGrid = (groupItems) => {
@@ -359,7 +574,7 @@ jQuery(function($) {
             let finalHtml = '';
             if (isUnwatchedView && $(window).width() < 800) {
                 const selectedAttr = (id) => (this.activeUnwatchedId == id) ? 'selected' : '';
-                finalHtml = `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div class="tvm-unwatched-nav-container"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}" ${selectedAttr(i.id)}>(${i.aired_unwatched_count}) ${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:20px;"></div></div>`;
+                finalHtml = `<div style="background:#fff; padding:20px; border-radius:12px; border:1px solid #eee; margin-bottom:20px;"><div class="tvm-unwatched-nav-container"><span class="dashicons dashicons-arrow-left-alt2 tvm-dropdown-nav" data-dir="prev" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span><select id="tvm-unwatched-dropdown" style="flex:1; max-width:400px; height:45px; border-radius:8px; border:1px solid #ddd; font-weight:600;"><option value="">-- Choose a Series (${items.length}) --</option>${items.map(i => `<option value="${i.id}" ${selectedAttr(i.id)}>(${i.aired_unwatched_count})${i.title}</option>`).join('')}</select><span class="dashicons dashicons-arrow-right-alt2 tvm-dropdown-nav" data-dir="next" style="cursor:pointer; font-size:30px; width:30px; height:30px; color:#2271b1;"></span></div><div id="tvm-unwatched-inline-container" style="display:${this.activeUnwatchedId ? 'block' : 'none'}; margin-top:20px;"></div></div>`;
             } else {
                 finalHtml += buildSection('Current Shows', currentShows, currentShows.length);
                 finalHtml += buildSection('Future Shows', futureShows, futureShows.length);
@@ -375,7 +590,7 @@ jQuery(function($) {
         },
 
         showInlineEpisodes: function(id) {
-            const item = window.tvm_tv_cache.find(i => i.id == id);
+            const item = (window.tvm_tv_cache || []).find(i => i.id == id);
             if (!item) {
                 $('#tvm-unwatched-inline-container').hide();
                 return;
@@ -384,9 +599,15 @@ jQuery(function($) {
             this.loadEpisodes(id);
         },
 
-        showSeriesDetails: function(id) {
-            const item = window.tvm_tv_cache.find(i => i.id == id);
+        showSeriesDetails: function(id, updateHistory = true) {
+            const item = (window.tvm_tv_cache || []).find(i => i.id == id);
             if (!item) return;
+
+            if (updateHistory) {
+                const base = this.getBasePath();
+                const cleanPath = base + 'tv/' + this.slugify(item.title) + '/';
+                window.history.pushState({ media: 'tv', show: this.slugify(item.title) }, '', cleanPath);
+            }
 
             $('#tvm-watchlist-grid, .tvm-filters-container').hide();
             $('#tvm-tv-detail-view').show();
@@ -409,8 +630,10 @@ jQuery(function($) {
                             <h2 style="margin:0 0 10px 0; font-size:28px; color:#1d2327;">${item.title}</h2>
                             <span style="background:${statusColor}; color:#fff; padding:4px 12px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">${item.status}</span>
                         </div>
-                        <button id="tvm-sync-episodes" class="button button-primary" data-id="${id}" style="border-radius:6px; font-weight:600;">Sync Metadata</button>
-                        <button id="tvm-update-series-status" class="button button-secondary" data-id="${id}" style="border-radius:6px; font-weight:600; margin-left: 8px;">Update Status Only</button>
+                        <div>
+                            <button id="tvm-sync-episodes" class="button button-primary" data-id="${id}" style="border-radius:6px; font-weight:600;">Sync Metadata</button>
+                            <button id="tvm-update-series-status" class="button button-secondary" data-id="${id}" style="border-radius:6px; font-weight:600; margin-left: 8px;">Update Status Only</button>
+                        </div>
                     </div>
                     
                     <div class="tvm-detail-stats" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:15px; margin-top:20px; border-top:1px solid #f0f0f0; padding-top:20px;">
@@ -480,6 +703,7 @@ jQuery(function($) {
                 }
             });
         },
+
         renderSources: function(sources) {
             if (!sources || !Array.isArray(sources) || sources.length === 0) return '<span style="font-size:10px; color:#999; text-transform:uppercase; background:#f5f5f5; padding:4px 8px; border-radius:4px; font-weight:700;">No Sources</span>';
             const sdata = window.tvm_settings_data || {};
