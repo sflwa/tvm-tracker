@@ -1,10 +1,10 @@
 <?php
 /**
  * Library Importer & Automation Logic
- * Version 2.1.2 - Added Weekly Movie Metadata Refresh
+ * Version 2.2.1 - TVmaze ID Auto-Saving & ID Editing Support
  *
  * @package TV_Movie_Tracker
- * @version 2.1.2
+ * @version 2.2.1
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -19,6 +19,7 @@ class TVM_Importer {
 		add_action( 'wp_ajax_tvm_sync_series', array( $this, 'handle_manual_sync' ) );
 		add_action( 'wp_ajax_tvm_sync_series_status', array( $this, 'handle_status_only_sync' ) );
 		add_action( 'wp_ajax_tvm_delete_item', array( $this, 'handle_delete' ) );
+		add_action( 'wp_ajax_tvm_update_item_ids', array( $this, 'handle_update_item_ids' ) );
 		
 		// Automation Hooks (WP-Cron)
 		add_action( 'tvm_weekly_sync_event', array( $this, 'run_weekly_sync' ) );
@@ -34,7 +35,6 @@ class TVM_Importer {
 
 	/**
 	 * Recalculates stats for a specific series and updates the flat table.
-	 * This is the core performance driver for large libraries.
 	 */
 	public function recalculate_series_stats( $post_id, $user_id = null ) {
 		global $wpdb;
@@ -75,7 +75,7 @@ class TVM_Importer {
 
 		$unwatched_count = max( 0, $aired_count - $watched_count );
 
-		// 4. Upsert into Stats Table (Flat Summary)
+		// 4. Upsert into Stats Table
 		$wpdb->query( $wpdb->prepare(
 			"INSERT INTO $table_stats (user_id, item_id, watched_count, unwatched_count, upcoming_count, last_updated)
 			 VALUES (%d, %d, %d, %d, %d, %s)
@@ -148,10 +148,6 @@ class TVM_Importer {
 		wp_send_json_success( array( 'post_id' => $post_id ) );
 	}
 
-	/**
-	 * Manual sync handler
-	 * Supports both TV (TVmaze) and Movies (TMDb Refresh)
-	 */
 	public function handle_manual_sync() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		$post_id = absint( $_POST['post_id'] );
@@ -173,9 +169,47 @@ class TVM_Importer {
 	}
 
 	/**
-	 * WEEKLY SYNC LOGIC (v2.1.2)
-	 * Refreshes TV episode schedules and Movie release dates
+	 * AJAX handler to update database reference IDs and force a re-sync.
 	 */
+	public function handle_update_item_ids() {
+		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( 'Unauthorized permission.' );
+		}
+
+		$post_id   = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
+		$tmdb_id   = isset( $_POST['tmdb_id'] ) ? sanitize_text_field( $_POST['tmdb_id'] ) : '';
+		$tvdb_id   = isset( $_POST['tvdb_id'] ) ? sanitize_text_field( $_POST['tvdb_id'] ) : '';
+		$imdb_id   = isset( $_POST['imdb_id'] ) ? sanitize_text_field( $_POST['imdb_id'] ) : '';
+		$tvmaze_id = isset( $_POST['tvmaze_id'] ) ? sanitize_text_field( $_POST['tvmaze_id'] ) : '';
+
+		if ( ! $post_id ) {
+			wp_send_json_error( 'Invalid Post ID.' );
+		}
+
+		update_post_meta( $post_id, '_tvm_tmdb_id', $tmdb_id );
+		update_post_meta( $post_id, '_tvm_tvdb_id', $tvdb_id );
+		update_post_meta( $post_id, '_tvm_imdb_id', $imdb_id );
+		update_post_meta( $post_id, '_tvm_tvmaze_id', $tvmaze_id );
+
+		$type = get_post_meta( $post_id, '_tvm_media_type', true );
+
+		if ( 'movie' === $type ) {
+			$this->refresh_movie_metadata( $post_id );
+		} else {
+			$this->sync_tvmaze_metadata( $post_id, $tvdb_id );
+		}
+
+		$this->sync_watchmode_data( $post_id );
+
+		if ( 'tv' === $type ) {
+			$this->recalculate_series_stats( $post_id );
+		}
+
+		wp_send_json_success( 'IDs updated and resync complete.' );
+	}
+
 	public function run_weekly_sync() {
 		$items = get_posts( array( 
 			'post_type'      => 'tvm_item', 
@@ -199,7 +233,6 @@ class TVM_Importer {
 					}
 				}
 			} else {
-				// MOVIE LOGIC: Check if movie is unwatched and either "Upcoming" or "TBA"
 				$is_watched = $this->is_item_fully_watched( $item->ID, 'movie' );
 				$release_date = get_post_meta( $item->ID, '_tvm_release_date', true );
 				$is_upcoming = ( ! $release_date || strtotime( $release_date ) > time() );
@@ -212,9 +245,6 @@ class TVM_Importer {
 		}
 	}
 
-	/**
-	 * Refreshes basic Movie metadata from TMDb (Release Date, Status, Poster)
-	 */
 	private function refresh_movie_metadata( $post_id ) {
 		$tmdb_id = get_post_meta( $post_id, '_tvm_tmdb_id', true );
 		if ( ! $tmdb_id ) return;
@@ -263,6 +293,9 @@ class TVM_Importer {
 		$lookup = $tvmaze->get_id_by_external( $tvdb_id );
 		if ( ! is_wp_error( $lookup ) && isset( $lookup['id'] ) ) {
 			
+			// Save TVmaze ID explicitly to metadata
+			update_post_meta( $post_id, '_tvm_tvmaze_id', $lookup['id'] );
+
 			$episodes = $tvmaze->get_episodes( $lookup['id'] );
 
 			$max_s = 0; $max_e = 0;
@@ -386,9 +419,6 @@ class TVM_Importer {
 		}
 	}
 
-/**
-	 * AJAX handler to manually update only the parent series status.
-	 */
 	public function handle_status_only_sync() {
 		check_ajax_referer( 'tvm_import_nonce', 'nonce' );
 		
@@ -402,7 +432,6 @@ class TVM_Importer {
 			wp_send_json_error( 'TVDB ID missing for status lookup.' );
 		}
 
-		// Run isolated updater
 		$updated_status = $this->sync_tvmaze_status_only( $post_id, $tvdb_id );
 
 		if ( is_wp_error( $updated_status ) ) {
@@ -412,10 +441,6 @@ class TVM_Importer {
 		wp_send_json_success( "Series status updated successfully to: " . $updated_status );
 	}
 
-	/**
-	 * Independent lookups targeting ONLY the main show data object.
-	 * Bypasses episode queries and insertions completely.
-	 */
 	public function sync_tvmaze_status_only( $post_id, $tvdb_id ) {
 		if ( ! $tvdb_id ) {
 			return new WP_Error( 'missing_id', 'Missing tracking ID' );
@@ -428,10 +453,8 @@ class TVM_Importer {
 			return $lookup;
 		}
 
-		// Grab the core show metadata block from TVmaze without fetching any episode embeds
 		if ( isset( $lookup['id'] ) ) {
-			// Check if your TVmaze class has an explicit fallback to read basic profiles, 
-			// otherwise we read the primary object returned right from the external lookup
+			update_post_meta( $post_id, '_tvm_tvmaze_id', $lookup['id'] );
 			$status = $lookup['status'] ?? '';
 
 			if ( empty( $status ) && method_exists( $tvmaze, 'get_show_by_id' ) ) {
@@ -448,8 +471,4 @@ class TVM_Importer {
 
 		return new WP_Error( 'sync_failed', 'Could not locate status property inside the API payload.' );
 	}
-
-
-
-	
 }
