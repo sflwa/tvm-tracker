@@ -1,9 +1,9 @@
 === TV & Movie Tracker ===
 Contributors: sflwa
-Tags: movies, tv shows, tracking, watchlist, tmdb, watchmode
+Tags: movies, tv shows, tracking, watchlist, tmdb, watchmode, tvmaze
 Requires at least: 5.8
-Tested up to: 6.4
-Stable tag: 1.9.7
+Tested up to: 6.6
+Stable tag: 2.3.2
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -19,6 +19,8 @@ Key Features:
 * **Strict Streaming Rules**: Supports subscription-only filtering, primary region locking for paid services, and "Free" service support across VPN regions.
 * **Upcoming & TBA Tracking**: Advanced sorting for rumored or undated films, including "X DAYS" countdown badges.
 * **Progress Tracking**: Mark movies as watched or drill down into TV series to track individual episode progress.
+* **Interactive Calendar**: Includes Month & Week views with single-line show truncation, episode pill toggles, and hover tooltips.
+* **Admin Database Management**: Quick-links and inline editing for external database IDs (TMDb, IMDb, TVDB, TVmaze).
 * **Modular JS/PHP**: Uses a core orchestrator to manage specialized modules for Search, Settings, Movies, and TV.
 
 == Dependencies & Credits ==
@@ -47,6 +49,15 @@ The plugin automatically flags these as "TBA" and moves them to the Upcoming fil
 
 == Changelog ==
 
+= 2.3.2 =
+* NEW: Added dedicated SFLWA Support menu item in the WordPress Admin for quick developer support access, documentation, and system diagnostics.
+* NEW: Redesigned Calendar view with Month and Week layout switchers.
+* NEW: Implemented single-line show title truncation with hover tooltips and compact `SxE` episode pill toggles.
+* NEW: Added External Database Sources quick-links card (TMDb, IMDb, TVDB, TVmaze) and inline ID editing on admin single item pages.
+* FIX: Resolved `/tv` 404 permalink issues when shortcode is embedded on root/front pages.
+* FIX: Restored "Back to List" state preservation to remember active filter views (`Watched`, `Unwatched`, `Upcoming`).
+* FIX: Automated TVmaze ID extraction and persistence during external metadata synchronization.
+
 = 2.0.0 =
 * NEW: Automation Health dashboard in Admin Settings.
 * NEW: Custom "Monthly" cron interval for streaming data refresh.
@@ -69,3 +80,6 @@ The plugin automatically flags these as "TBA" and moves them to the Upcoming fil
 
 = 1.0.0 =
 * Initial release with TMDb and Watchmode integration.
+
+== Thank You ==
+Thank you to WebCami for your support of my work.
